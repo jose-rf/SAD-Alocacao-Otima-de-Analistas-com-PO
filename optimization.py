@@ -1,58 +1,26 @@
-"""
-Modelo de Programacao Linear Inteira Mista (MILP) para alocacao de analistas
-em projetos de assessoria em regime de horas.
-
-Implementa exatamente a formulacao apresentada na secao 6.2.2 do pre-projeto
-de TCC "Sistema para Alocacao de Analistas em Projetos de Assessoria em
-Regime de Horas: uma abordagem por Programacao Linear Inteira Mista (MILP)
-com foco na maximizacao do lucro liquido" (Franca; Brito, UEMG, 2026).
-
-Conjuntos (secao 6.2.2.2):
-    I = analistas disponiveis
-    J = projetos candidatos a aceitacao
-    K = habilidades tecnicas consideradas na alocacao
-
-Variaveis de decisao (secao 6.2.2.3 / Tabela 6.2.1.1):
-    x[i, j] : horas do analista i alocadas ao projeto j (continua, >= 0)
-    y[j]    : projeto j aceito (1) ou recusado (0) (binaria)
-    z[i, j] : analista i vinculado ao projeto j (1) ou nao (0) (binaria)
-
-Funcao objetivo (Equacao 1):
-    Maximizar Z = sum_j Rj * y[j]  -  sum_i sum_j Ci * x[i, j]
-
-Restricoes (Equacoes 2 a 11), na integra conforme secao 6.2.2.5:
-    (2)  sum_j x[i, j] <= Di                         para todo i
-    (3)  sum_i x[i, j] <= Hj * y[j]                   para todo j
-    (4)  x[i, j] <= M * z[i, j]                       para todo i, j
-    (5)  x[i, j] >= h_min * z[i, j]                   para todo i, j
-    (6)  sum_i z[i, j] <= Njmax                       para todo j
-    (7)  sum_i z[i, j] >= y[j]                        para todo j
-    (8)  Si >= Sjmin * z[i, j]                        para todo i, j
-         (e restricoes analogas para COM, COL, ORG, ADA, EST)
-    (9)  SKILLik >= REQjk * z[i, j]                   para todo i, j, k
-    (10) z[i, j] <= 1 - Ai                            para todo i, j
-    (11) x[i, j] >= 0                                 para todo i, j
-
-O big-M (secao 6.2.1.5) e' calculado automaticamente como o maior valor entre
-as horas contratadas dos projetos e a disponibilidade dos analistas, de modo a
-ser "suficientemente grande" sem enfraquecer a formulacao (nenhuma alocacao
-individual pode superar nem as horas contratadas do projeto - Equacao 3 - nem
-a disponibilidade do analista - Equacao 2).
-"""
+# Modelo MILP (Programacao Linear Inteira Mista) da alocacao de analistas.
+# Equacoes 1 a 11 conforme secao 6.2.2 do pre-projeto de TCC. Resolvido com
+# PuLP usando o solver CBC.
+#
+# Conjuntos:
+#   I = analistas
+#   J = projetos
+#   K = habilidades tecnicas
+#
+# Variaveis:
+#   x[i,j] -> horas do analista i no projeto j (continua)
+#   y[j]   -> projeto j aceito ou nao (binaria)
+#   z[i,j] -> analista i vinculado ao projeto j (binaria)
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 import pulp
 
-# ---------------------------------------------------------------------------
-# Constantes do modelo (secao 6.2.1.4 - Matriz de Competencias Comportamentais,
-# baseada no modelo conceitual Big Five / Goldberg, 1990)
-# ---------------------------------------------------------------------------
-
 NIVEIS: Dict[str, int] = {"Junior": 1, "Pleno": 2, "Senior": 3}
 NIVEIS_LABEL: Dict[str, str] = {"Junior": "Junior", "Pleno": "Pleno", "Senior": "Senior"}
 
+# competencias comportamentais baseadas no Big Five (Goldberg, 1990)
 TRAITS: Tuple[str, ...] = ("COM", "COL", "ORG", "ADA", "EST")
 TRAIT_LABELS: Dict[str, str] = {
     "COM": "Comunicacao",
@@ -63,21 +31,17 @@ TRAIT_LABELS: Dict[str, str] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Entidades de entrada (parametros do modelo - secao 6.2.1.2 e 6.2.1.3)
-# ---------------------------------------------------------------------------
-
 @dataclass
 class Analista:
     nome: str
-    senioridade: str                       # Si (Junior/Pleno/Senior)
+    senioridade: str                       # Si
     custo_hora: float                      # Ci
     disponibilidade: float                 # Di
-    ausente: bool = False                  # Ai (auxilio programada)
+    ausente: bool = False                  # Ai
     competencias: Dict[str, float] = field(default_factory=dict)   # SKILLik
     big5: Dict[str, float] = field(
         default_factory=lambda: {t: 50.0 for t in TRAITS}
-    )                                       # COMi, COLi, ORGi, ADAi, ESTi
+    )
 
 
 @dataclass
@@ -85,17 +49,13 @@ class Projeto:
     nome: str
     receita: float                         # Rj
     horas: float                           # Hj
-    nivel_min: str                         # Sjmin (Junior/Pleno/Senior)
+    nivel_min: str                         # Sjmin
     max_analistas: int                     # Njmax
     competencias_min: Dict[str, float] = field(default_factory=dict)  # REQjk
     big5_min: Dict[str, float] = field(
         default_factory=lambda: {t: 0.0 for t in TRAITS}
-    )                                       # COMjmin, COLjmin, ORGjmin, ADAjmin, ESTjmin
+    )
 
-
-# ---------------------------------------------------------------------------
-# Saida do modelo
-# ---------------------------------------------------------------------------
 
 @dataclass
 class Alocacao:
@@ -133,13 +93,9 @@ class ResultadoOtimizacao:
     resumo_analistas: List[ResumoAnalista]
 
 
-# ---------------------------------------------------------------------------
-# Construcao e resolucao do modelo MILP
-# ---------------------------------------------------------------------------
-
 def _calcular_big_m(analistas: List[Analista], projetos: List[Projeto]) -> float:
-    """Big-M (secao 6.2.1.5): suficientemente grande para nao restringir x[i,j]
-    alem do que as Equacoes 2 e 3 ja restringem."""
+    # M so precisa ser maior que qualquer x[i,j] possivel; o maior valor
+    # entre horas contratadas e disponibilidade ja serve pra isso
     candidatos = [p.horas for p in projetos] + [a.disponibilidade for a in analistas]
     candidatos = [c for c in candidatos if c and c > 0]
     return max(candidatos) if candidatos else 1.0
@@ -150,8 +106,6 @@ def resolver_modelo(
     projetos: List[Projeto],
     h_min: float,
 ) -> ResultadoOtimizacao:
-    """Monta e resolve o modelo MILP (Equacoes 1 a 11) com PuLP/CBC."""
-
     I = list(range(len(analistas)))
     J = list(range(len(projetos)))
     K = sorted({k for p in projetos for k, v in p.competencias_min.items() if v > 0})
@@ -167,51 +121,51 @@ def resolver_modelo(
     y = {j: pulp.LpVariable(f"y_{j}", cat="Binary") for j in J}
     z = {(i, j): pulp.LpVariable(f"z_{i}_{j}", cat="Binary") for i in I for j in J}
 
-    # Equacao 1 - Funcao objetivo: maximizar o lucro liquido
+    # Eq 1 - funcao objetivo: lucro liquido = receita dos projetos aceitos - custo da mao de obra
     prob += (
         pulp.lpSum(projetos[j].receita * y[j] for j in J)
         - pulp.lpSum(analistas[i].custo_hora * x[i, j] for i in I for j in J)
     ), "Lucro_Liquido"
 
-    # Equacao 2 - Disponibilidade de horas de cada analista
+    # Eq 2 - disponibilidade do analista
     for i in I:
         prob += (
             pulp.lpSum(x[i, j] for j in J) <= analistas[i].disponibilidade,
             f"disponibilidade_{i}",
         )
 
-    # Equacao 3 - Horas alocadas a um projeto vs. horas contratadas
+    # Eq 3 - horas alocadas nao passam das horas contratadas (so vale se o projeto foi aceito)
     for j in J:
         prob += (
             pulp.lpSum(x[i, j] for i in I) <= projetos[j].horas * y[j],
             f"demanda_{j}",
         )
 
-    # Equacao 4 - Vinculo entre x[i,j] e z[i,j] via big-M
+    # Eq 4 - liga x e z (se z=0, x tem que ser 0)
     for i in I:
         for j in J:
             prob += x[i, j] <= M * z[i, j], f"vinculo_M_{i}_{j}"
 
-    # Equacao 5 - Horas minimas por alocacao (h_min)
+    # Eq 5 - se o analista foi vinculado, tem que cumprir pelo menos h_min horas
     for i in I:
         for j in J:
             prob += x[i, j] >= h_min * z[i, j], f"horas_min_{i}_{j}"
 
-    # Equacao 6 - Numero maximo de analistas por projeto (Njmax)
+    # Eq 6 - numero maximo de analistas por projeto
     for j in J:
         prob += (
             pulp.lpSum(z[i, j] for i in I) <= projetos[j].max_analistas,
             f"max_analistas_{j}",
         )
 
-    # Equacao 7 - Todo projeto aceito possui ao menos um analista responsavel
+    # Eq 7 - projeto aceito precisa ter pelo menos um analista
     for j in J:
         prob += (
             pulp.lpSum(z[i, j] for i in I) >= y[j],
             f"min_um_analista_{j}",
         )
 
-    # Equacao 8 - Senioridade minima exigida pelo projeto
+    # Eq 8 - senioridade minima
     for i in I:
         for j in J:
             prob += (
@@ -220,7 +174,8 @@ def resolver_modelo(
                 f"senioridade_{i}_{j}",
             )
 
-    # Equacao 8 (restricoes analogas) - competencias comportamentais Big Five
+    # Eq 8 (analogas) - competencias comportamentais. so entra restricao quando
+    # o projeto exige um minimo > 0 pra aquela dimensao (senao seria sempre verdade)
     for trait in TRAITS:
         for i in I:
             for j in J:
@@ -229,7 +184,7 @@ def resolver_modelo(
                     valor = analistas[i].big5.get(trait, 0.0)
                     prob += valor >= minimo * z[i, j], f"{trait}_{i}_{j}"
 
-    # Equacao 9 - Habilidades tecnicas (SKILLik >= REQjk * z[i,j])
+    # Eq 9 - habilidades tecnicas exigidas pelo projeto
     for k in K:
         for i in I:
             for j in J:
@@ -238,12 +193,12 @@ def resolver_modelo(
                     nivel = analistas[i].competencias.get(k, 0.0)
                     prob += nivel >= req * z[i, j], f"skill_{k}_{i}_{j}"
 
-    # Equacao 10 - Ausencia programada impede alocacao
+    # Eq 10 - analista ausente nao pode ser alocado
     for i in I:
         for j in J:
             prob += z[i, j] <= (0 if analistas[i].ausente else 1), f"ausencia_{i}_{j}"
 
-    # Equacao 11 - Nao negatividade de x[i,j] ja garantida por lowBound=0
+    # Eq 11 - x[i,j] >= 0 ja garantido pelo lowBound la em cima
 
     prob.solve(pulp.PULP_CBC_CMD(msg=0))
     status = pulp.LpStatus[prob.status]
@@ -323,10 +278,8 @@ def resolver_modelo(
 
 
 def _diagnosticar_recusa(projeto: Projeto, analistas: List[Analista], h_min: float) -> str:
-    """Nota explicativa (fora do modelo formal) sobre a provavel causa da
-    recusa de um projeto pelo solver, usada apenas para apresentar o
-    resultado ao gestor na tela de resultados (secao 6.2.4.1, Figura 4)."""
-
+    # isso aqui e so pra mostrar um motivo pro usuario na tela de resultado,
+    # nao faz parte do modelo (nao entra em nenhuma restricao do solver)
     elegiveis = []
     for a in analistas:
         if a.ausente:

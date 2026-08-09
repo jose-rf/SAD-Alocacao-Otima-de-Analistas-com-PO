@@ -1,15 +1,4 @@
-"""
-Interface Streamlit do modulo de Sistema de Apoio a Decisao (SAD) para
-alocacao de analistas em projetos de assessoria em regime de horas.
-
-Implementa em Streamlit o fluxo de telas prototipado no Figma (secao 6.2.4.1
-do pre-projeto de TCC): cadastro de analistas, cadastro de projetos,
-parametros e execucao da otimizacao (PuLP/CBC) e apresentacao dos resultados,
-conforme secao 6.2.4.2 (Implementacao em Streamlit).
-
-Execucao:
-    streamlit run app.py
-"""
+# Interface do SAD (Streamlit) - roda com: streamlit run app.py
 
 import uuid
 
@@ -31,10 +20,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# ---------------------------------------------------------------------------
-# Estilo (paleta reaproveitada do prototipo de alta fidelidade em Figma)
-# ---------------------------------------------------------------------------
-
+# paleta usada no protótipo do Figma
 st.markdown(
     """
     <style>
@@ -62,12 +48,7 @@ st.markdown(
 )
 
 
-# ---------------------------------------------------------------------------
-# Dados de exemplo (fictícios, conforme secao 6.1.3 - "Uso de Dados Ficticios
-# e Justificativa": parametros calibrados para representar o problema real
-# sem pertencer a uma organizacao especifica)
-# ---------------------------------------------------------------------------
-
+# dados ficticios pra nao abrir o sistema vazio (ver secao 6.1.3 do pre-projeto)
 def _dados_exemplo_analistas():
     return [
         {
@@ -142,10 +123,7 @@ if "resultado" not in st.session_state:
     st.session_state.resultado = None
 
 
-# ---------------------------------------------------------------------------
-# Cabecalho
-# ---------------------------------------------------------------------------
-
+# cabecalho
 st.markdown('<div class="sad-kicker">Sistema de Apoio a Decisao &middot; MILP</div>', unsafe_allow_html=True)
 st.title("Alocacao Otima de Analistas")
 st.markdown(
@@ -157,9 +135,7 @@ st.markdown(
 st.divider()
 
 
-# ---------------------------------------------------------------------------
-# Secao 01 - Analistas
-# ---------------------------------------------------------------------------
+# ===== Analistas =====
 
 st.subheader(f"01 · Analistas ({len(st.session_state.analistas)} cadastrados)")
 
@@ -220,9 +196,7 @@ if st.button("+ Adicionar analista"):
 st.divider()
 
 
-# ---------------------------------------------------------------------------
-# Secao 02 - Projetos
-# ---------------------------------------------------------------------------
+# ===== Projetos =====
 
 st.subheader(f"02 · Projetos ({len(st.session_state.projetos)} cadastrados)")
 
@@ -287,9 +261,7 @@ if st.button("+ Adicionar projeto"):
 st.divider()
 
 
-# ---------------------------------------------------------------------------
-# Secao 03 - Parametros e execucao
-# ---------------------------------------------------------------------------
+# ===== Parametros e execucao =====
 
 st.subheader("03 · Parametros e execucao")
 
@@ -374,9 +346,7 @@ with st.container(border=True):
 st.divider()
 
 
-# ---------------------------------------------------------------------------
-# Secao 04 - Resultado
-# ---------------------------------------------------------------------------
+# ===== Resultado =====
 
 resultado = st.session_state.resultado
 
@@ -427,9 +397,7 @@ if resultado is not None:
 
     st.divider()
 
-    # -----------------------------------------------------------------
-    # Secao 05 - Exportacao do relatorio
-    # -----------------------------------------------------------------
+    # ===== Exportacao do relatorio =====
 
     st.subheader("05 · Exportacao do relatorio")
 
