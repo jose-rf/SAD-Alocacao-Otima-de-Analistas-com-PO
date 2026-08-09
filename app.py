@@ -104,7 +104,7 @@ def _dados_exemplo_projetos():
     return [
         {
             "id": str(uuid.uuid4()), "nome": "Consultoria Fiscal", "receita": 90000.0,
-            "horas": 240.0, "min_analistas": 1, "max_analistas": 3, "nivel_min": "Pleno",
+            "horas": 240.0, "max_analistas": 3, "nivel_min": "Pleno",
             "competencias": pd.DataFrame(
                 [{"Habilidade": "Tributario", "Nivel minimo (0-100)": 80},
                  {"Habilidade": "Compliance", "Nivel minimo (0-100)": 70}]
@@ -113,7 +113,7 @@ def _dados_exemplo_projetos():
         },
         {
             "id": str(uuid.uuid4()), "nome": "Auditoria Interna", "receita": 60000.0,
-            "horas": 160.0, "min_analistas": 1, "max_analistas": 2, "nivel_min": "Senior",
+            "horas": 160.0, "max_analistas": 2, "nivel_min": "Senior",
             "competencias": pd.DataFrame(
                 [{"Habilidade": "Auditoria", "Nivel minimo (0-100)": 90},
                  {"Habilidade": "SAP", "Nivel minimo (0-100)": 60}]
@@ -122,7 +122,7 @@ def _dados_exemplo_projetos():
         },
         {
             "id": str(uuid.uuid4()), "nome": "Implantacao ERP", "receita": 140000.0,
-            "horas": 400.0, "min_analistas": 2, "max_analistas": 4, "nivel_min": "Junior",
+            "horas": 400.0, "max_analistas": 4, "nivel_min": "Junior",
             "competencias": pd.DataFrame(
                 [{"Habilidade": "SAP", "Nivel minimo (0-100)": 85},
                  {"Habilidade": "Power BI", "Nivel minimo (0-100)": 75}]
@@ -238,7 +238,7 @@ for idx, p in enumerate(st.session_state.projetos):
             "Nome do projeto", value=p["nome"], key=f"pnome_{p['id']}", placeholder="Ex.: Consultoria Fiscal",
         )
 
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3 = st.columns(3)
         p["receita"] = c1.number_input(
             "Receita esperada (R$)", min_value=0.0, value=float(p["receita"]), step=1000.0, key=f"receita_{p['id']}",
             help="Receita do projeto (Rj), usada na funcao objetivo (Equacao 1).",
@@ -247,13 +247,10 @@ for idx, p in enumerate(st.session_state.projetos):
             "Horas contratadas", min_value=0.0, value=float(p["horas"]), step=10.0, key=f"horas_{p['id']}",
             help="Horas contratadas (Hj), limite da Equacao 3.",
         )
-        p["min_analistas"] = c3.number_input(
-            "N. min. analistas", min_value=1, value=int(p["min_analistas"]), step=1, key=f"minan_{p['id']}",
-            help="Generalizacao da Equacao 7 (sum z[i,j] >= min_analistas * y[j]).",
-        )
-        p["max_analistas"] = c4.number_input(
+        p["max_analistas"] = c3.number_input(
             "N. max. analistas", min_value=1, value=int(p["max_analistas"]), step=1, key=f"maxan_{p['id']}",
-            help="Numero maximo de analistas (Njmax), limite da Equacao 6.",
+            help="Numero maximo de analistas (Njmax), limite da Equacao 6. Todo projeto "
+                 "aceito tem no minimo um analista responsavel (Equacao 7).",
         )
 
         p["nivel_min"] = st.selectbox(
@@ -280,7 +277,7 @@ if st.button("+ Adicionar projeto"):
     st.session_state.projetos.append(
         {
             "id": str(uuid.uuid4()), "nome": "", "receita": 0.0, "horas": 0.0,
-            "min_analistas": 1, "max_analistas": 1, "nivel_min": "Pleno",
+            "max_analistas": 1, "nivel_min": "Pleno",
             "competencias": pd.DataFrame(columns=["Habilidade", "Nivel minimo (0-100)"]),
             "big5_min": {t: 0 for t in TRAITS},
         }
@@ -360,7 +357,6 @@ with st.container(border=True):
                 horas=p["horas"],
                 nivel_min=p["nivel_min"],
                 max_analistas=int(p["max_analistas"]),
-                min_analistas=int(p["min_analistas"]),
                 competencias_min={
                     str(r["Habilidade"]): float(r["Nivel minimo (0-100)"])
                     for _, r in p["competencias"].dropna().iterrows()

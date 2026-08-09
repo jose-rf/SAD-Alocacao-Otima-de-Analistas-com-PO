@@ -33,11 +33,6 @@ Restricoes (Equacoes 2 a 11), na integra conforme secao 6.2.2.5:
     (10) z[i, j] <= 1 - Ai                            para todo i, j
     (11) x[i, j] >= 0                                 para todo i, j
 
-Unica generalizacao explicita em relacao ao artigo: a Equacao 7 e' parametrizada
-por um numero minimo de analistas por projeto (min_analistas, campo presente no
-prototipo de interface, secao 6.2.4.1). Com min_analistas = 1 (valor padrao) a
-restricao volta a ser identica a Equacao 7 do artigo (sum_i z[i,j] >= y[j]).
-
 O big-M (secao 6.2.1.5) e' calculado automaticamente como o maior valor entre
 as horas contratadas dos projetos e a disponibilidade dos analistas, de modo a
 ser "suficientemente grande" sem enfraquecer a formulacao (nenhuma alocacao
@@ -92,7 +87,6 @@ class Projeto:
     horas: float                           # Hj
     nivel_min: str                         # Sjmin (Junior/Pleno/Senior)
     max_analistas: int                     # Njmax
-    min_analistas: int = 1                 # generalizacao da Equacao 7
     competencias_min: Dict[str, float] = field(default_factory=dict)  # REQjk
     big5_min: Dict[str, float] = field(
         default_factory=lambda: {t: 0.0 for t in TRAITS}
@@ -210,11 +204,11 @@ def resolver_modelo(
             f"max_analistas_{j}",
         )
 
-    # Equacao 7 (generalizada por min_analistas; min_analistas=1 == artigo)
+    # Equacao 7 - Todo projeto aceito possui ao menos um analista responsavel
     for j in J:
         prob += (
-            pulp.lpSum(z[i, j] for i in I) >= projetos[j].min_analistas * y[j],
-            f"min_analistas_{j}",
+            pulp.lpSum(z[i, j] for i in I) >= y[j],
+            f"min_um_analista_{j}",
         )
 
     # Equacao 8 - Senioridade minima exigida pelo projeto
@@ -358,9 +352,6 @@ def _diagnosticar_recusa(projeto: Projeto, analistas: List[Analista], h_min: flo
     if not elegiveis:
         return ("nenhum analista atende simultaneamente a senioridade minima, as "
                 "competencias tecnicas e o perfil comportamental exigidos pelo projeto.")
-    if len(elegiveis) < projeto.min_analistas:
-        return (f"apenas {len(elegiveis)} analista(s) elegivel(is), abaixo do minimo "
-                f"de {projeto.min_analistas} exigido pelo projeto.")
     capacidade = sum(a.disponibilidade for a in elegiveis)
     if capacidade < projeto.horas:
         return ("a capacidade agregada de horas dos analistas elegiveis e menor que "

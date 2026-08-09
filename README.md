@@ -61,11 +61,9 @@ Maximizar Z = Σ_j Rj·y[j]  −  Σ_i Σ_j Ci·x[i,j]
 | 10 | Ausencia programada | `z[i,j] ≤ 1 − Ai` |
 | 11 | Nao negatividade | `x[i,j] ≥ 0` |
 
-A unica generalizacao em relacao ao artigo e a Equacao 7, parametrizada por
-um numero minimo de analistas por projeto (`min_analistas`, campo presente
-no prototipo de interface); com `min_analistas = 1` (padrao) a restricao e
-identica a do artigo. O parametro big-M e calculado automaticamente como o
-maior valor entre as horas contratadas dos projetos e a disponibilidade dos
+O codigo implementa as Equacoes 1 a 11 tal como escritas no artigo, sem
+generalizacoes. O parametro big-M e calculado automaticamente como o maior
+valor entre as horas contratadas dos projetos e a disponibilidade dos
 analistas.
 
 As competencias comportamentais sao baseadas no modelo conceitual **Big
@@ -94,7 +92,7 @@ A interface segue o fluxo prototipado em alta fidelidade no Figma (secao
    disponibilidade, ausencia programada, competencias tecnicas (tabela
    editavel) e perfil comportamental Big Five (sliders).
 2. **Projetos** — cadastro dinamico: nome, receita esperada, horas
-   contratadas, numero minimo/maximo de analistas, nivel tecnico minimo,
+   contratadas, numero maximo de analistas, nivel tecnico minimo,
    competencias tecnicas exigidas e perfil comportamental minimo exigido.
 3. **Parametros e execucao** — configuracao de `h_min` e execucao do
    solver (PuLP/CBC).
