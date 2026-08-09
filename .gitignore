@@ -1,0 +1,9 @@
+# Obsidian — estado de UI local, não deve ser versionado
+.obsidian/workspace.json
+.obsidian/workspace*.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
