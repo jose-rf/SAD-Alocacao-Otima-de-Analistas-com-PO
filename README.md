@@ -62,15 +62,46 @@ Maximizar Z = Σ_j Rj·y[j]  −  Σ_i Σ_j Ci·x[i,j]
 | 11 | Nao negatividade | `x[i,j] ≥ 0` |
 
 O codigo implementa as Equacoes 1 a 11 tal como escritas no artigo, sem
-generalizacoes. O parametro big-M e calculado automaticamente como o maior
-valor entre as horas contratadas dos projetos e a disponibilidade dos
-analistas.
+generalizacoes.
 
 As competencias comportamentais sao baseadas no modelo conceitual **Big
 Five** (Goldberg, 1990): Comunicacao (Extroversao), Colaboracao
 (Amabilidade), Organizacao (Conscienciosidade), Adaptabilidade (Abertura a
 Experiencia) e Estabilidade Emocional (Neuroticismo invertido), preenchidas
 pelo gestor em escala de 0 a 100.
+
+### Fidelidade ao pre-projeto
+
+As 11 equacoes estao implementadas de forma literal — nao ha divergencia
+matematica em relacao ao texto. Tres parametros, porem, sao descritos no
+pre-projeto de forma qualitativa (sem formula fechada) e precisaram de uma
+decisao de implementacao para o codigo ser executavel:
+
+- **Big-M** (secao 6.2.1.5 define apenas como "um valor suficientemente
+  grande") — calculado automaticamente como o maior valor entre `Hj` de
+  todos os projetos e `Di` de todos os analistas.
+- **Codificacao numerica de `Si`/`Sjmin`** — o artigo trata senioridade como
+  categorias comparaveis (Junior/Pleno/Senior) sem formalizar a conversao
+  numerica; o codigo usa Junior=1, Pleno=2, Senior=3 para viabilizar
+  `Si ≥ Sjmin·z[i,j]`.
+- **Requisitos com minimo igual a zero** (competencias comportamentais e
+  tecnicas) — quando um projeto nao exige minimo para uma dimensao (valor
+  0), a restricao correspondente e omitida por ser redundante
+  (`valor ≥ 0·z[i,j]` seria sempre verdadeira). O espaco de solucoes nao se
+  altera.
+
+Nenhum desses pontos muda o resultado da otimizacao em relacao ao que as
+equacoes do artigo produziriam.
+
+Ha, alem disso, uma unica peca de codigo que **nao faz parte do modelo
+MILP**: a funcao `_diagnosticar_recusa()` em `optimization.py`, que gera o
+texto explicativo exibido ao lado de cada projeto recusado na tela de
+Resultado (ex.: "nenhum analista atende a senioridade minima..."). Essa
+logica e puramente descritiva — nao entra em nenhuma restricao do solver e
+nao influencia `x[i,j]`, `y[j]` ou `z[i,j]` — e existe apenas como recurso
+de UX do SAD para tornar a recusa de um projeto compreensivel ao gestor,
+conforme o papel de "explicar a decisao ao usuario" atribuido a um SAD na
+secao 7.4.1 do pre-projeto.
 
 ---
 
