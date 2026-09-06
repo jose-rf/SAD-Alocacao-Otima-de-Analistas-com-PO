@@ -9,3 +9,7 @@ __pycache__/
 venv/
 .streamlit/secrets.toml
 .claude/
+
+# Banco de dados local (SQLite) - dados de cadastro/execucao, nao versionados
+*.db
+*.sqlite3

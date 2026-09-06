@@ -1,10 +1,14 @@
 # Interface do SAD (Streamlit) - roda com: streamlit run app.py
+#
+# Persistencia em SQLite (db.py, 7 tabelas: analistas, projetos, habilidades,
+# analista_habilidade, projeto_habilidade_requerida, execucoes, alocacoes).
+# Cada edicao de campo grava direto no banco (sem botao "salvar" separado) -
+# o script inteiro roda de novo a cada interacao, e os dados sao sempre lidos
+# do banco no topo do script, entao a fonte da verdade e' sempre o SQLite.
 
-import uuid
-
-import pandas as pd
 import streamlit as st
 
+import db
 from optimization import (
     NIVEIS,
     TRAITS,
@@ -47,80 +51,37 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-
-# dados ficticios pra nao abrir o sistema vazio (ver secao 6.1.3 do pre-projeto)
-def _dados_exemplo_analistas():
-    return [
-        {
-            "id": str(uuid.uuid4()), "nome": "Ana Souza", "senioridade": "Senior",
-            "custo_hora": 140.0, "disponibilidade": 160.0, "ausente": False,
-            "competencias": pd.DataFrame(
-                [{"Habilidade": "Tributario", "Nivel (0-100)": 85},
-                 {"Habilidade": "Auditoria", "Nivel (0-100)": 90}]
-            ),
-            "big5": {"COM": 80, "COL": 60, "ORG": 75, "ADA": 55, "EST": 70},
-        },
-        {
-            "id": str(uuid.uuid4()), "nome": "Bruno Lima", "senioridade": "Pleno",
-            "custo_hora": 95.0, "disponibilidade": 150.0, "ausente": False,
-            "competencias": pd.DataFrame(
-                [{"Habilidade": "SAP", "Nivel (0-100)": 70},
-                 {"Habilidade": "Power BI", "Nivel (0-100)": 80}]
-            ),
-            "big5": {"COM": 65, "COL": 70, "ORG": 60, "ADA": 80, "EST": 50},
-        },
-        {
-            "id": str(uuid.uuid4()), "nome": "Camila Rocha", "senioridade": "Senior",
-            "custo_hora": 130.0, "disponibilidade": 150.0, "ausente": False,
-            "competencias": pd.DataFrame(
-                [{"Habilidade": "Auditoria", "Nivel (0-100)": 95},
-                 {"Habilidade": "SAP", "Nivel (0-100)": 65}]
-            ),
-            "big5": {"COM": 75, "COL": 55, "ORG": 85, "ADA": 60, "EST": 80},
-        },
-    ]
+db.init_db()
+with db.get_connection() as _conn:
+    db.seed_dados_exemplo(_conn)
 
 
-def _dados_exemplo_projetos():
-    return [
-        {
-            "id": str(uuid.uuid4()), "nome": "Consultoria Fiscal", "receita": 90000.0,
-            "horas": 240.0, "max_analistas": 3, "nivel_min": "Pleno",
-            "competencias": pd.DataFrame(
-                [{"Habilidade": "Tributario", "Nivel minimo (0-100)": 80},
-                 {"Habilidade": "Compliance", "Nivel minimo (0-100)": 70}]
-            ),
-            "big5_min": {"COM": 50, "COL": 0, "ORG": 50, "ADA": 0, "EST": 0},
-        },
-        {
-            "id": str(uuid.uuid4()), "nome": "Auditoria Interna", "receita": 60000.0,
-            "horas": 160.0, "max_analistas": 2, "nivel_min": "Senior",
-            "competencias": pd.DataFrame(
-                [{"Habilidade": "Auditoria", "Nivel minimo (0-100)": 90},
-                 {"Habilidade": "SAP", "Nivel minimo (0-100)": 60}]
-            ),
-            "big5_min": {"COM": 0, "COL": 0, "ORG": 50, "ADA": 0, "EST": 50},
-        },
-        {
-            "id": str(uuid.uuid4()), "nome": "Implantacao ERP", "receita": 140000.0,
-            "horas": 400.0, "max_analistas": 4, "nivel_min": "Junior",
-            "competencias": pd.DataFrame(
-                [{"Habilidade": "SAP", "Nivel minimo (0-100)": 85},
-                 {"Habilidade": "Power BI", "Nivel minimo (0-100)": 75}]
-            ),
-            "big5_min": {"COM": 0, "COL": 50, "ORG": 0, "ADA": 50, "EST": 0},
-        },
-    ]
+# ── Helpers de leitura (linha SQLite -> dict de trabalho) ───────────────────
+
+def _analista_dict(row):
+    return {
+        "id": row["id_analista"], "nome": row["nome"], "senioridade": row["senioridade"],
+        "custo_hora": row["custo_hora"], "disponibilidade": row["disponibilidade"],
+        "ausente": bool(row["ausente"]),
+        "big5": {"COM": row["com"], "COL": row["col"], "ORG": row["org"],
+                  "ADA": row["ada"], "EST": row["est"]},
+    }
 
 
-if "analistas" not in st.session_state:
-    st.session_state.analistas = _dados_exemplo_analistas()
-if "projetos" not in st.session_state:
-    st.session_state.projetos = _dados_exemplo_projetos()
-if "h_min" not in st.session_state:
-    st.session_state.h_min = 20
+def _projeto_dict(row):
+    return {
+        "id": row["id_projeto"], "nome": row["nome"], "receita": row["receita"],
+        "horas": row["horas"], "nivel_min": row["nivel_min"],
+        "max_analistas": row["max_analistas"], "min_analistas": row["min_analistas"],
+        "big5_min": {"COM": row["com_min"], "COL": row["col_min"], "ORG": row["org_min"],
+                      "ADA": row["ada_min"], "EST": row["est_min"]},
+    }
+
+
 if "resultado" not in st.session_state:
     st.session_state.resultado = None
+if "h_min" not in st.session_state:
+    st.session_state.h_min = 20
 
 
 # cabecalho
@@ -135,135 +96,267 @@ st.markdown(
 st.divider()
 
 
-# ===== Analistas =====
+# ===== 01 · Analistas =====
 
-st.subheader(f"01 · Analistas ({len(st.session_state.analistas)} cadastrados)")
+with db.get_connection() as conn:
+    analistas = [_analista_dict(r) for r in db.list_analistas(conn)]
 
-for idx, a in enumerate(st.session_state.analistas):
+st.subheader(f"01 · Analistas ({len(analistas)} cadastrados)")
+
+for idx, a in enumerate(analistas):
     with st.container(border=True):
         col_head, col_del = st.columns([10, 1])
         col_head.markdown(f'<div class="sad-card-kicker">Analista {idx + 1}</div>', unsafe_allow_html=True)
         if col_del.button("Remover", key=f"del_analista_{a['id']}", use_container_width=True):
-            st.session_state.analistas = [x for x in st.session_state.analistas if x["id"] != a["id"]]
+            with db.get_connection() as conn:
+                db.delete_analista(conn, a["id"])
             st.rerun()
 
-        a["nome"] = st.text_input("Nome", value=a["nome"], key=f"nome_{a['id']}", placeholder="Ex.: Ana Souza")
+        nome = st.text_input("Nome", value=a["nome"], key=f"nome_{a['id']}", placeholder="Ex.: Ana Souza")
 
         c1, c2, c3 = st.columns(3)
-        a["senioridade"] = c1.selectbox(
+        senioridade = c1.selectbox(
             "Senioridade", options=list(NIVEIS.keys()),
             index=list(NIVEIS.keys()).index(a["senioridade"]), key=f"nivel_{a['id']}",
             help="Nivel de experiencia (Si). Comparado ao minimo exigido pelo projeto (Sjmin) na Equacao 8.",
         )
-        a["custo_hora"] = c2.number_input(
+        custo_hora = c2.number_input(
             "Custo/h (R$)", min_value=0.0, value=float(a["custo_hora"]), step=5.0, key=f"custo_{a['id']}",
             help="Custo por hora do analista (Ci), usado na funcao objetivo (Equacao 1).",
         )
-        a["disponibilidade"] = c3.number_input(
+        disponibilidade = c3.number_input(
             "Disp. (h/mes)", min_value=0.0, value=float(a["disponibilidade"]), step=5.0, key=f"disp_{a['id']}",
             help="Disponibilidade de horas (Di), limite da Equacao 2.",
         )
-        a["ausente"] = st.checkbox(
+        ausente = st.checkbox(
             "Ausencia programada no periodo (Ai)", value=a["ausente"], key=f"ausente_{a['id']}",
             help="Se marcado, o analista nao pode ser vinculado a nenhum projeto (Equacao 10).",
         )
 
-        st.caption("Proficiencia tecnica (SKILLik, escala 0-100)")
-        a["competencias"] = st.data_editor(
-            a["competencias"], num_rows="dynamic", key=f"skills_{a['id']}",
-            use_container_width=True, hide_index=True,
+        st.caption(
+            "Perfil comportamental Big Five (0-100). Competencias tecnicas sao "
+            "cadastradas na tela **02 · Habilidades tecnicas dos analistas**, abaixo."
         )
-
-        st.caption("Perfil comportamental Big Five (0-100)")
         cols = st.columns(5)
+        big5 = dict(a["big5"])
         for i, trait in enumerate(TRAITS):
-            a["big5"][trait] = cols[i].slider(
+            big5[trait] = cols[i].slider(
                 trait, min_value=0, max_value=100, value=int(a["big5"].get(trait, 50)),
                 key=f"big5_{trait}_{a['id']}", help=TRAIT_LABELS[trait],
             )
 
+        with db.get_connection() as conn:
+            db.update_analista(conn, a["id"], {
+                "nome": nome, "senioridade": senioridade, "custo_hora": custo_hora,
+                "disponibilidade": disponibilidade, "ausente": int(ausente),
+                "com": big5["COM"], "col": big5["COL"], "org": big5["ORG"],
+                "ada": big5["ADA"], "est": big5["EST"],
+            })
+
 if st.button("+ Adicionar analista"):
-    st.session_state.analistas.append(
-        {
-            "id": str(uuid.uuid4()), "nome": "", "senioridade": "Pleno",
-            "custo_hora": 0.0, "disponibilidade": 0.0, "ausente": False,
-            "competencias": pd.DataFrame(columns=["Habilidade", "Nivel (0-100)"]),
-            "big5": {t: 50 for t in TRAITS},
-        }
-    )
+    with db.get_connection() as conn:
+        db.insert_analista(conn, {
+            "nome": "", "senioridade": "Pleno", "custo_hora": 0.0, "disponibilidade": 0.0,
+            "ausente": 0, "com": 50, "col": 50, "org": 50, "ada": 50, "est": 50,
+        })
     st.rerun()
 
 st.divider()
 
 
-# ===== Projetos =====
+# ===== 02 · Habilidades tecnicas dos analistas =====
 
-st.subheader(f"02 · Projetos ({len(st.session_state.projetos)} cadastrados)")
+st.subheader("02 · Habilidades tecnicas dos analistas")
+st.caption(
+    "Gerencie o catalogo global de habilidades tecnicas e o nivel de proficiencia "
+    "(SKILLik, 0-100) de cada analista em cada habilidade."
+)
 
-for idx, p in enumerate(st.session_state.projetos):
+with st.container(border=True):
+    st.markdown('<div class="sad-card-kicker">Catalogo de habilidades</div>', unsafe_allow_html=True)
+    with db.get_connection() as conn:
+        habilidades = db.list_habilidades(conn)
+
+    if habilidades:
+        for h in habilidades:
+            hc1, hc2, hc3 = st.columns([6, 2, 1])
+            novo_nome = hc1.text_input(
+                "Nome da habilidade", value=h["nome"], key=f"hab_nome_{h['id_habilidade']}",
+                label_visibility="collapsed",
+            )
+            if novo_nome != h["nome"] and hc2.button("Renomear", key=f"hab_ren_{h['id_habilidade']}"):
+                try:
+                    with db.get_connection() as conn:
+                        db.rename_habilidade(conn, h["id_habilidade"], novo_nome)
+                    st.rerun()
+                except ValueError as e:
+                    st.error(str(e))
+            if hc3.button("✕", key=f"hab_del_{h['id_habilidade']}", help="Remover habilidade do catalogo"):
+                with db.get_connection() as conn:
+                    db.delete_habilidade(conn, h["id_habilidade"])
+                st.rerun()
+    else:
+        st.caption("Nenhuma habilidade cadastrada ainda.")
+
+    nova_habilidade = st.text_input("+ Nova habilidade", key="nova_habilidade", placeholder="Ex.: Python")
+    if st.button("Adicionar ao catalogo", key="btn_add_habilidade"):
+        try:
+            with db.get_connection() as conn:
+                db.add_habilidade(conn, nova_habilidade)
+            st.rerun()
+        except ValueError as e:
+            st.error(str(e))
+
+if habilidades and analistas:
+    with st.container(border=True):
+        st.markdown('<div class="sad-card-kicker">Proficiencia por analista</div>', unsafe_allow_html=True)
+        nomes_analistas = [a["nome"] or f"(sem nome, id {a['id']})" for a in analistas]
+        idx_sel = st.selectbox(
+            "Analista", options=range(len(analistas)),
+            format_func=lambda i: nomes_analistas[i], key="skill_analista_sel",
+        )
+        analista_sel = analistas[idx_sel]
+        with db.get_connection() as conn:
+            niveis = db.get_niveis_analista(conn, analista_sel["id"])
+        for h in habilidades:
+            nivel_atual = niveis.get(h["id_habilidade"], 0)
+            nivel = st.slider(
+                h["nome"], min_value=0, max_value=100, value=int(nivel_atual),
+                key=f"skill_{analista_sel['id']}_{h['id_habilidade']}",
+            )
+            if nivel != nivel_atual:
+                with db.get_connection() as conn:
+                    db.set_nivel_analista(conn, analista_sel["id"], h["id_habilidade"], nivel)
+elif not habilidades:
+    st.caption("Cadastre ao menos uma habilidade no catalogo para atribuir proficiencias.")
+else:
+    st.caption("Cadastre ao menos um analista para atribuir proficiencias.")
+
+st.divider()
+
+
+# ===== 03 · Projetos =====
+
+with db.get_connection() as conn:
+    projetos = [_projeto_dict(r) for r in db.list_projetos(conn)]
+
+st.subheader(f"03 · Projetos ({len(projetos)} cadastrados)")
+
+for idx, p in enumerate(projetos):
     with st.container(border=True):
         col_head, col_del = st.columns([10, 1])
         col_head.markdown(f'<div class="sad-card-kicker">Projeto {idx + 1}</div>', unsafe_allow_html=True)
         if col_del.button("Remover", key=f"del_projeto_{p['id']}", use_container_width=True):
-            st.session_state.projetos = [x for x in st.session_state.projetos if x["id"] != p["id"]]
+            with db.get_connection() as conn:
+                db.delete_projeto(conn, p["id"])
             st.rerun()
 
-        p["nome"] = st.text_input(
+        nome = st.text_input(
             "Nome do projeto", value=p["nome"], key=f"pnome_{p['id']}", placeholder="Ex.: Consultoria Fiscal",
         )
 
-        c1, c2, c3 = st.columns(3)
-        p["receita"] = c1.number_input(
+        c1, c2, c3, c4 = st.columns(4)
+        receita = c1.number_input(
             "Receita esperada (R$)", min_value=0.0, value=float(p["receita"]), step=1000.0, key=f"receita_{p['id']}",
             help="Receita do projeto (Rj), usada na funcao objetivo (Equacao 1).",
         )
-        p["horas"] = c2.number_input(
+        horas = c2.number_input(
             "Horas contratadas", min_value=0.0, value=float(p["horas"]), step=10.0, key=f"horas_{p['id']}",
-            help="Horas contratadas (Hj), limite da Equacao 3.",
+            help="Horas contratadas (Hj). Com o projeto aceito (yj=1), a equipe deve "
+                 "entregar exatamente Hj horas - nem mais, nem menos (Equacao 3).",
         )
-        p["max_analistas"] = c3.number_input(
-            "N. max. analistas", min_value=1, value=int(p["max_analistas"]), step=1, key=f"maxan_{p['id']}",
-            help="Numero maximo de analistas (Njmax), limite da Equacao 6. Todo projeto "
-                 "aceito tem no minimo um analista responsavel (Equacao 7).",
+        max_analistas = c3.number_input(
+            "N. max. analistas (Njmax)", min_value=1, value=int(p["max_analistas"]), step=1, key=f"maxan_{p['id']}",
+            help="Numero maximo de analistas vinculados ao projeto (Equacao 6).",
+        )
+        min_analistas = c4.number_input(
+            "N. min. analistas (Njmin)", min_value=1, max_value=int(max_analistas),
+            value=min(int(p["min_analistas"]), int(max_analistas)), step=1, key=f"minan_{p['id']}",
+            help="Numero minimo de analistas vinculados quando o projeto e' aceito "
+                 "(Equacao 7 generalizada). Default = 1.",
         )
 
-        p["nivel_min"] = st.selectbox(
+        nivel_min = st.selectbox(
             "Nivel tecnico minimo", options=list(NIVEIS.keys()),
             index=list(NIVEIS.keys()).index(p["nivel_min"]), key=f"pnivel_{p['id']}",
             help="Senioridade minima exigida (Sjmin), comparada na Equacao 8 (Junior < Pleno < Senior).",
         )
 
-        st.caption("Competencias tecnicas exigidas (REQjk, escala 0-100; 0 = nao exigida)")
-        p["competencias"] = st.data_editor(
-            p["competencias"], num_rows="dynamic", key=f"pskills_{p['id']}",
-            use_container_width=True, hide_index=True,
+        st.caption(
+            "Competencias tecnicas exigidas (REQjk) sao cadastradas na tela "
+            "**04 · Habilidades tecnicas exigidas pelos projetos**, abaixo."
         )
-
         st.caption("Perfil comportamental minimo exigido (0-100; 0 = nao exigido) – restricoes analogas a Equacao 8")
         cols = st.columns(5)
+        big5_min = dict(p["big5_min"])
         for i, trait in enumerate(TRAITS):
-            p["big5_min"][trait] = cols[i].slider(
+            big5_min[trait] = cols[i].slider(
                 trait, min_value=0, max_value=100, value=int(p["big5_min"].get(trait, 0)),
                 key=f"pbig5_{trait}_{p['id']}", help=TRAIT_LABELS[trait],
             )
 
+        with db.get_connection() as conn:
+            db.update_projeto(conn, p["id"], {
+                "nome": nome, "receita": receita, "horas": horas, "nivel_min": nivel_min,
+                "max_analistas": int(max_analistas), "min_analistas": int(min_analistas),
+                "com_min": big5_min["COM"], "col_min": big5_min["COL"], "org_min": big5_min["ORG"],
+                "ada_min": big5_min["ADA"], "est_min": big5_min["EST"],
+            })
+
 if st.button("+ Adicionar projeto"):
-    st.session_state.projetos.append(
-        {
-            "id": str(uuid.uuid4()), "nome": "", "receita": 0.0, "horas": 0.0,
-            "max_analistas": 1, "nivel_min": "Pleno",
-            "competencias": pd.DataFrame(columns=["Habilidade", "Nivel minimo (0-100)"]),
-            "big5_min": {t: 0 for t in TRAITS},
-        }
-    )
+    with db.get_connection() as conn:
+        db.insert_projeto(conn, {
+            "nome": "", "receita": 0.0, "horas": 0.0, "nivel_min": "Pleno",
+            "max_analistas": 1, "min_analistas": 1,
+            "com_min": 0, "col_min": 0, "org_min": 0, "ada_min": 0, "est_min": 0,
+        })
     st.rerun()
 
 st.divider()
 
 
-# ===== Parametros e execucao =====
+# ===== 04 · Habilidades tecnicas exigidas pelos projetos =====
 
-st.subheader("03 · Parametros e execucao")
+st.subheader("04 · Habilidades tecnicas exigidas pelos projetos")
+st.caption(
+    "Defina, para cada projeto, o nivel minimo exigido (REQjk, 0-100) em cada "
+    "habilidade do catalogo. Uma habilidade com REQjk = 0 nao entra na restricao "
+    "de cobertura (Equacao 9) - equivale a 'nao exigida'."
+)
+
+with db.get_connection() as conn:
+    habilidades = db.list_habilidades(conn)
+
+if not habilidades:
+    st.caption("Cadastre ao menos uma habilidade na tela 02 para definir exigencias.")
+elif not projetos:
+    st.caption("Cadastre ao menos um projeto para definir exigencias.")
+else:
+    with st.container(border=True):
+        nomes_projetos = [p["nome"] or f"(sem nome, id {p['id']})" for p in projetos]
+        idx_sel = st.selectbox(
+            "Projeto", options=range(len(projetos)),
+            format_func=lambda i: nomes_projetos[i], key="req_projeto_sel",
+        )
+        projeto_sel = projetos[idx_sel]
+        with db.get_connection() as conn:
+            reqs = db.get_requisitos_projeto(conn, projeto_sel["id"])
+        for h in habilidades:
+            req_atual = reqs.get(h["id_habilidade"], 0)
+            req = st.slider(
+                h["nome"], min_value=0, max_value=100, value=int(req_atual),
+                key=f"req_{projeto_sel['id']}_{h['id_habilidade']}",
+            )
+            if req != req_atual:
+                with db.get_connection() as conn:
+                    db.set_requisito_projeto(conn, projeto_sel["id"], h["id_habilidade"], req)
+
+st.divider()
+
+
+# ===== 05 · Parametros e execucao =====
+
+st.subheader("05 · Parametros e execucao")
 
 with st.container(border=True):
     st.session_state.h_min = st.number_input(
@@ -275,7 +368,7 @@ with st.container(border=True):
 
     def _analistas_validos():
         erros = []
-        for a in st.session_state.analistas:
+        for a in analistas:
             if not a["nome"].strip():
                 erros.append("Ha analistas sem nome.")
             if a["custo_hora"] <= 0:
@@ -286,17 +379,22 @@ with st.container(border=True):
 
     def _projetos_validos():
         erros = []
-        for p in st.session_state.projetos:
+        for p in projetos:
             if not p["nome"].strip():
                 erros.append("Ha projetos sem nome.")
             if p["receita"] <= 0:
                 erros.append(f"Receita de '{p['nome'] or 'projeto sem nome'}' deve ser maior que zero.")
             if p["horas"] <= 0:
                 erros.append(f"Horas de '{p['nome'] or 'projeto sem nome'}' devem ser maiores que zero.")
+            if not (1 <= p["min_analistas"] <= p["max_analistas"]):
+                erros.append(
+                    f"Njmin de '{p['nome'] or 'projeto sem nome'}' deve satisfazer "
+                    f"1 <= Njmin ({p['min_analistas']}) <= Njmax ({p['max_analistas']})."
+                )
         return erros
 
     erros = []
-    if not st.session_state.analistas or not st.session_state.projetos:
+    if not analistas or not projetos:
         erros.append("Cadastre ao menos um projeto e um analista para executar o modelo.")
     erros += _analistas_validos()
     erros += _projetos_validos()
@@ -306,59 +404,51 @@ with st.container(border=True):
             st.error(e)
 
     if st.button("Executar otimizacao", type="primary", disabled=bool(erros)):
+        with db.get_connection() as conn:
+            niveis_por_analista = {a["id"]: db.get_niveis_analista(conn, a["id"]) for a in analistas}
+            reqs_por_projeto = {p["id"]: db.get_requisitos_projeto(conn, p["id"]) for p in projetos}
+
         analistas_modelo = [
             Analista(
-                nome=a["nome"],
-                senioridade=a["senioridade"],
-                custo_hora=a["custo_hora"],
-                disponibilidade=a["disponibilidade"],
-                ausente=a["ausente"],
-                competencias={
-                    str(r["Habilidade"]): float(r["Nivel (0-100)"])
-                    for _, r in a["competencias"].dropna().iterrows()
-                    if str(r.get("Habilidade", "")).strip()
-                },
-                big5=dict(a["big5"]),
+                nome=a["nome"], senioridade=a["senioridade"], custo_hora=a["custo_hora"],
+                disponibilidade=a["disponibilidade"], ausente=a["ausente"],
+                competencias=dict(niveis_por_analista[a["id"]]), big5=dict(a["big5"]),
             )
-            for a in st.session_state.analistas
+            for a in analistas
         ]
         projetos_modelo = [
             Projeto(
-                nome=p["nome"],
-                receita=p["receita"],
-                horas=p["horas"],
-                nivel_min=p["nivel_min"],
-                max_analistas=int(p["max_analistas"]),
-                competencias_min={
-                    str(r["Habilidade"]): float(r["Nivel minimo (0-100)"])
-                    for _, r in p["competencias"].dropna().iterrows()
-                    if str(r.get("Habilidade", "")).strip()
-                },
-                big5_min=dict(p["big5_min"]),
+                nome=p["nome"], receita=p["receita"], horas=p["horas"], nivel_min=p["nivel_min"],
+                max_analistas=int(p["max_analistas"]), min_analistas=int(p["min_analistas"]),
+                competencias_min=dict(reqs_por_projeto[p["id"]]), big5_min=dict(p["big5_min"]),
             )
-            for p in st.session_state.projetos
+            for p in projetos
         ]
         with st.spinner("Resolvendo o modelo MILP (PuLP/CBC)..."):
-            st.session_state.resultado = resolver_modelo(
-                analistas_modelo, projetos_modelo, st.session_state.h_min
-            )
+            resultado = resolver_modelo(analistas_modelo, projetos_modelo, st.session_state.h_min)
+        st.session_state.resultado = resultado
+
+        with db.get_connection() as conn:
+            id_por_nome_analista = {a["nome"]: a["id"] for a in analistas}
+            id_por_nome_projeto = {p["nome"]: p["id"] for p in projetos}
+            db.salvar_execucao(conn, st.session_state.h_min, resultado, id_por_nome_analista, id_por_nome_projeto)
 
 st.divider()
 
 
-# ===== Resultado =====
+# ===== 06 · Resultado =====
 
 resultado = st.session_state.resultado
 
 if resultado is not None:
-    st.subheader("04 · Resultado")
+    st.subheader("06 · Resultado")
 
     if not resultado.viavel:
         st.error(f"O modelo nao encontrou solucao viavel (status do solver: {resultado.status}).")
     else:
         st.success("Solucao encontrada.")
 
-        n_projetos = len(st.session_state.projetos)
+        n_projetos = len(projetos)
         margem = (resultado.lucro_liquido / resultado.receita_total * 100) if resultado.receita_total else 0.0
 
         k1, k2, k3, k4 = st.columns(4)
@@ -374,6 +464,7 @@ if resultado is not None:
 
         st.markdown('<div class="sad-card-kicker">Alocacao detalhada</div>', unsafe_allow_html=True)
         if resultado.alocacoes:
+            import pandas as pd
             df = pd.DataFrame(
                 [
                     {
@@ -397,9 +488,9 @@ if resultado is not None:
 
     st.divider()
 
-    # ===== Exportacao do relatorio =====
+    # ===== 07 · Exportacao do relatorio =====
 
-    st.subheader("05 · Exportacao do relatorio")
+    st.subheader("07 · Exportacao do relatorio")
 
     def _montar_relatorio_txt() -> str:
         linhas = []
@@ -408,8 +499,8 @@ if resultado is not None:
         linhas.append("=" * 60)
         linhas.append(f"Parametro h_min (horas minimas por alocacao): {st.session_state.h_min}h")
         linhas.append(
-            f"Projetos cadastrados: {len(st.session_state.projetos)} | "
-            f"Analistas cadastrados: {len(st.session_state.analistas)}"
+            f"Projetos cadastrados: {len(projetos)} | "
+            f"Analistas cadastrados: {len(analistas)}"
         )
         linhas.append("")
         linhas.append("1. RESULTADO GERAL")
@@ -420,7 +511,7 @@ if resultado is not None:
             linhas.append(f"Lucro liquido total: R$ {resultado.lucro_liquido:,.2f}")
             linhas.append(f"Receita total: R$ {resultado.receita_total:,.2f}")
             linhas.append(f"Custo total alocado: R$ {resultado.custo_total:,.2f}")
-            linhas.append(f"Projetos aceitos: {len(resultado.aceitos)} de {len(st.session_state.projetos)}")
+            linhas.append(f"Projetos aceitos: {len(resultado.aceitos)} de {len(projetos)}")
             linhas.append("")
             linhas.append("2. ALOCACAO DETALHADA (analista x projeto x horas)")
             linhas.append("-" * 60)
@@ -452,8 +543,10 @@ if resultado is not None:
         linhas.append("-" * 60)
         linhas.append(
             "Resultado obtido pela resolucao exata do modelo de Programacao Linear "
-            "Inteira Mista (Equacoes 1 a 11) via solver CBC (branch-and-cut), "
-            "atraves da biblioteca PuLP."
+            "Inteira Mista (Equacoes 1 a 11, com os ajustes documentados no README: "
+            "piso de horas contratadas, Njmin generalizado e cobertura conjunta de "
+            "habilidades tecnicas) via solver CBC (branch-and-cut), atraves da "
+            "biblioteca PuLP."
         )
         return "\n".join(linhas)
 

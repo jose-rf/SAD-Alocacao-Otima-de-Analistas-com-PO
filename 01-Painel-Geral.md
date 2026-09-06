@@ -26,6 +26,9 @@ Desenvolver um sistema de apoio à decisão (SAD) para otimizar a alocação de 
 - Python + PuLP (modelagem MILP) + Solver CBC
 - Figma (prototipação de interface)
 - Streamlit (interface web)
+- SQLite (persistência de cadastros e histórico de execuções)
 
 ## Código no repositório
-- [`alocacao_analistas (1).py`](../alocacao_analistas%20(1).py) — implementação atual do modelo MILP
+- [`optimization.py`](../optimization.py) — modelo MILP (Equações 1-11 + ajustes documentados no README)
+- [`db.py`](../db.py) — persistência SQLite (schema, CRUD, seed de dados de exemplo)
+- [`app.py`](../app.py) — interface Streamlit (7 telas: cadastro, execução, resultados, exportação)

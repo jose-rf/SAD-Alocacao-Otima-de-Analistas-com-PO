@@ -10,14 +10,16 @@ kanban-plugin: board
 
 ## Fase 2 - Modelagem
 
-- [ ] Definição do cenário fictício
-- [ ] Definição do modelo MILP (variáveis, restrições, função objetivo)
+- [x] Definição do cenário fictício
+- [x] Definição do modelo MILP (variáveis, restrições, função objetivo)
 - [ ] Finalização do referencial teórico
 
 ## Fase 3 - Implementação
 
-- [ ] Implementação do modelo em Python/PuLP
-- [ ] Criação da interface Streamlit
+- [x] Implementação do modelo em Python/PuLP
+- [x] Criação da interface Streamlit
+- [x] Persistência SQLite (cadastros + histórico de execuções)
+- [ ] Capturas de tela das telas de habilidades técnicas para as Figuras do TCC
 
 ## Fase 4 - Validação
 

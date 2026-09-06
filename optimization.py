@@ -1,11 +1,24 @@
 # Modelo MILP (Programacao Linear Inteira Mista) da alocacao de analistas.
-# Equacoes 1 a 11 conforme secao 6.2.2 do pre-projeto de TCC. Resolvido com
-# PuLP usando o solver CBC.
+# Base: Equacoes 1 a 11 da secao 6.2.2 do pre-projeto de TCC, resolvidas com
+# PuLP/CBC. Tres ajustes explicitos em relacao ao artigo (documentados aqui
+# e no README, todos lineares, sem variaveis novas):
+#
+#   - Eq. 3 ganhou uma restricao simetrica de piso: projeto aceito passa a
+#     exigir Sum_i x[i,j] == Hj (nao so <= Hj), evitando que o lucro
+#     reconheca a receita cheia sem entregar as horas contratadas.
+#   - Eq. 7 foi generalizada por um parametro Njmin (minimo de analistas por
+#     projeto, default 1). Com Njmin=1 a restricao volta a ser identica ao
+#     artigo.
+#   - Eq. 9 deixou de exigir que cada analista vinculado cubra sozinho todas
+#     as habilidades tecnicas exigidas; agora basta que, para cada
+#     habilidade exigida, ao menos um analista da equipe a atenda (cobertura
+#     conjunta). E' um relaxamento estrito do espaco viavel anterior: toda
+#     solucao antes viavel continua viavel, entao o lucro otimo nunca piora.
 #
 # Conjuntos:
 #   I = analistas
 #   J = projetos
-#   K = habilidades tecnicas
+#   K = habilidades tecnicas exigidas por algum projeto (REQjk > 0)
 #
 # Variaveis:
 #   x[i,j] -> horas do analista i no projeto j (continua)
@@ -51,6 +64,7 @@ class Projeto:
     horas: float                           # Hj
     nivel_min: str                         # Sjmin
     max_analistas: int                     # Njmax
+    min_analistas: int = 1                 # Njmin (default = 1, ver topo do arquivo)
     competencias_min: Dict[str, float] = field(default_factory=dict)  # REQjk
     big5_min: Dict[str, float] = field(
         default_factory=lambda: {t: 0.0 for t in TRAITS}
@@ -138,7 +152,16 @@ def resolver_modelo(
     for j in J:
         prob += (
             pulp.lpSum(x[i, j] for i in I) <= projetos[j].horas * y[j],
-            f"demanda_{j}",
+            f"demanda_teto_{j}",
+        )
+
+    # Eq 3 (piso, NOVA) - projeto aceito entrega de fato as horas contratadas,
+    # nao so' evita ultrapassa-las. Combinada com a de cima: y[j]=1 forca
+    # Sum_i x[i,j] == Hj; y[j]=0 forca Sum_i x[i,j] == 0.
+    for j in J:
+        prob += (
+            pulp.lpSum(x[i, j] for i in I) >= projetos[j].horas * y[j],
+            f"demanda_piso_{j}",
         )
 
     # Eq 4 - liga x e z (se z=0, x tem que ser 0)
@@ -158,11 +181,12 @@ def resolver_modelo(
             f"max_analistas_{j}",
         )
 
-    # Eq 7 - projeto aceito precisa ter pelo menos um analista
+    # Eq 7 (generalizada por Njmin) - projeto aceito precisa ter pelo menos
+    # Njmin analistas vinculados; Njmin=1 (default) reproduz o artigo.
     for j in J:
         prob += (
-            pulp.lpSum(z[i, j] for i in I) >= y[j],
-            f"min_um_analista_{j}",
+            pulp.lpSum(z[i, j] for i in I) >= projetos[j].min_analistas * y[j],
+            f"min_analistas_{j}",
         )
 
     # Eq 8 - senioridade minima
@@ -184,14 +208,23 @@ def resolver_modelo(
                     valor = analistas[i].big5.get(trait, 0.0)
                     prob += valor >= minimo * z[i, j], f"{trait}_{i}_{j}"
 
-    # Eq 9 - habilidades tecnicas exigidas pelo projeto
-    for k in K:
-        for i in I:
-            for j in J:
-                req = projetos[j].competencias_min.get(k, 0.0)
-                if req > 0:
-                    nivel = analistas[i].competencias.get(k, 0.0)
-                    prob += nivel >= req * z[i, j], f"skill_{k}_{i}_{j}"
+    # Eq 9 (cobertura conjunta) - para cada habilidade tecnica exigida pelo
+    # projeto, basta que AO MENOS UM analista vinculado a atenda - nao
+    # precisa ser o mesmo analista para todas as habilidades exigidas.
+    # I_jk (analistas aptos) e' pre-computado a partir dos dados de entrada,
+    # entao a restricao continua linear em z[i,j]. Se I_jk for vazio para
+    # alguma habilidade exigida por j, lpSum(...) = 0 e a propria restricao
+    # forca y[j] = 0 (projeto inviavel), sem tratamento especial.
+    for j in J:
+        for k in K:
+            req = projetos[j].competencias_min.get(k, 0.0)
+            if req <= 0:
+                continue
+            I_jk = [i for i in I if analistas[i].competencias.get(k, 0.0) >= req]
+            prob += (
+                pulp.lpSum(z[i, j] for i in I_jk) >= y[j],
+                f"cobertura_habilidade_{j}_{k}",
+            )
 
     # Eq 10 - analista ausente nao pode ser alocado
     for i in I:
@@ -279,7 +312,9 @@ def resolver_modelo(
 
 def _diagnosticar_recusa(projeto: Projeto, analistas: List[Analista], h_min: float) -> str:
     # isso aqui e so pra mostrar um motivo pro usuario na tela de resultado,
-    # nao faz parte do modelo (nao entra em nenhuma restricao do solver)
+    # nao faz parte do modelo (nao entra em nenhuma restricao do solver).
+    # Habilidades tecnicas sao cobertura de EQUIPE (Eq 9): um analista e'
+    # "elegivel" pra time sem precisar cobrir sozinho todas as habilidades.
     elegiveis = []
     for a in analistas:
         if a.ausente:
@@ -292,23 +327,31 @@ def _diagnosticar_recusa(projeto: Projeto, analistas: List[Analista], h_min: flo
             if minimo > 0
         ):
             continue
-        if any(
-            a.competencias.get(k, 0.0) < minimo
-            for k, minimo in projeto.competencias_min.items()
-            if minimo > 0
-        ):
-            continue
         if a.disponibilidade < h_min:
             continue
         elegiveis.append(a)
 
     if not elegiveis:
-        return ("nenhum analista atende simultaneamente a senioridade minima, as "
-                "competencias tecnicas e o perfil comportamental exigidos pelo projeto.")
+        return ("nenhum analista atende simultaneamente a senioridade minima, o "
+                "perfil comportamental exigidos pelo projeto e a disponibilidade "
+                "minima (h_min).")
+
+    faltando = [
+        k for k, minimo in projeto.competencias_min.items()
+        if minimo > 0 and not any(a.competencias.get(k, 0.0) >= minimo for a in elegiveis)
+    ]
+    if faltando:
+        return ("nenhum analista elegivel (apto em senioridade, perfil "
+                "comportamental e disponibilidade) atende ao nivel minimo exigido "
+                "para a(s) habilidade(s) tecnica(s): " + ", ".join(map(str, faltando)) + ".")
+
     capacidade = sum(a.disponibilidade for a in elegiveis)
     if capacidade < projeto.horas:
         return ("a capacidade agregada de horas dos analistas elegiveis e menor que "
                 "as horas contratadas do projeto.")
+    if len(elegiveis) < projeto.min_analistas:
+        return (f"apenas {len(elegiveis)} analista(s) elegivel(is), abaixo do minimo "
+                f"de {projeto.min_analistas} exigido pelo projeto (Njmin).")
     return ("projeto nao selecionado pelo modelo por nao contribuir para a "
             "maximizacao do lucro liquido diante da disponibilidade de horas "
             "dos analistas nesse cenario (trade-off de otimizacao).")
