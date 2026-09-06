@@ -49,6 +49,7 @@ def _projeto_dict(row):
         "id": row["id_projeto"], "nome": row["nome"], "receita": row["receita"],
         "horas": row["horas"], "nivel_min": row["nivel_min"],
         "max_analistas": row["max_analistas"], "min_analistas": row["min_analistas"],
+        "prazo_semanas": row["prazo_semanas"],
         "big5_min": {"COM": row["com_min"], "COL": row["col_min"], "ORG": row["org_min"],
                       "ADA": row["ada_min"], "EST": row["est_min"]},
     }
@@ -186,6 +187,7 @@ def pagina_projetos():
                     "Nome": p["nome"], "Receita (R$)": p["receita"], "Horas": p["horas"],
                     "Nível mínimo": NIVEIS_LABEL[p["nivel_min"]],
                     "Njmax": p["max_analistas"], "Njmin": p["min_analistas"],
+                    "Prazo (semanas)": p["prazo_semanas"],
                 }
                 for p in projetos
             ]),
@@ -212,7 +214,7 @@ def _form_projeto(p):
     with st.container(border=True):
         nome = st.text_input("Nome do projeto", value="" if novo else p["nome"], key=f"pr_nome_{chave}")
 
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         receita = c1.number_input(
             "Receita esperada (R$)", min_value=0.0, value=0.0 if novo else float(p["receita"]),
             step=1000.0, key=f"pr_receita_{chave}",
@@ -227,6 +229,12 @@ def _form_projeto(p):
         min_analistas = c4.number_input(
             "Njmin", min_value=1, max_value=int(max_analistas),
             value=1 if novo else min(int(p["min_analistas"]), int(max_analistas)), step=1, key=f"pr_minan_{chave}",
+        )
+        prazo_semanas = c5.number_input(
+            "Prazo (semanas)", min_value=1, value=4 if novo else int(p["prazo_semanas"]), step=1,
+            key=f"pr_prazo_{chave}",
+            help="Quando uma alocação confirmada deste projeto completa esse prazo (contado a "
+                 "partir da confirmação), as horas do analista são liberadas automaticamente.",
         )
 
         nivel_min = st.selectbox(
@@ -251,6 +259,7 @@ def _form_projeto(p):
                 dados = {
                     "nome": nome, "receita": receita, "horas": horas, "nivel_min": nivel_min,
                     "max_analistas": int(max_analistas), "min_analistas": int(min_analistas),
+                    "prazo_semanas": int(prazo_semanas),
                     "com_min": big5_min["COM"], "col_min": big5_min["COL"], "org_min": big5_min["ORG"],
                     "ada_min": big5_min["ADA"], "est_min": big5_min["EST"],
                 }
@@ -366,12 +375,10 @@ def pagina_habilidades():
 
 
 # =====================================================================
-# Página · Geração da Alocação
+# Seção · Gerar nova alocação (dentro do Dashboard de Resultados)
 # =====================================================================
 
-def pagina_geracao():
-    st.title("Geração da Alocação")
-
+def _secao_geracao():
     with db.get_connection() as conn:
         analistas = [_analista_dict(r) for r in db.list_analistas(conn)]
         projetos = [_projeto_dict(r) for r in db.list_projetos(conn)]
@@ -502,7 +509,7 @@ def pagina_geracao():
                 input_hash=input_hash,
             )
         st.session_state.ultima_execucao_id = id_execucao
-        st.success(f"Prévia #{id_execucao} gerada. Veja o Dashboard de Resultados para confirmar.")
+        st.success(f"Prévia #{id_execucao} gerada. Veja o histórico abaixo para confirmar.")
 
 
 # =====================================================================
@@ -512,11 +519,14 @@ def pagina_geracao():
 def pagina_dashboard():
     st.title("Dashboard de Resultados")
 
+    with st.expander("Gerar nova alocação"):
+        _secao_geracao()
+
     with db.get_connection() as conn:
         execucoes = db.list_execucoes(conn)
 
     if not execucoes:
-        st.info("Nenhuma execução registrada ainda. Gere uma prévia em Geração da Alocação.")
+        st.info("Nenhuma execução registrada ainda. Gere uma prévia acima.")
         return
 
     st.dataframe(
@@ -585,6 +595,13 @@ def pagina_dashboard():
             use_container_width=True, hide_index=True,
         )
 
+    def _rotulo_ativa(a):
+        if execucao["situacao"] == db.SITUACAO_CANDIDATA:
+            return "— (prévia não confirmada)"
+        if execucao["situacao"] == db.SITUACAO_ENCERRADA:
+            return "Não (execução encerrada)"
+        return "Sim" if a["ativa"] else "Não (prazo do projeto encerrado)"
+
     st.subheader("Alocação detalhada")
     if alocacoes_db:
         st.dataframe(
@@ -592,6 +609,7 @@ def pagina_dashboard():
                 {
                     "Analista": a["analista_nome"], "Projeto": a["projeto_nome"],
                     "Horas": a["horas"], "Custo (R$)": a["custo"], "Receita gerada (R$)": a["receita"],
+                    "Conta na disponibilidade": _rotulo_ativa(a),
                 }
                 for a in alocacoes_db
             ]),
@@ -664,7 +682,6 @@ pg = st.navigation([
     st.Page(pagina_analistas, title="Cadastro de Analistas", icon=":material/person:"),
     st.Page(pagina_projetos, title="Cadastro de Projetos", icon=":material/folder:"),
     st.Page(pagina_habilidades, title="Cadastro de Habilidades Técnicas", icon=":material/star:"),
-    st.Page(pagina_geracao, title="Geração da Alocação", icon=":material/settings:"),
     st.Page(pagina_dashboard, title="Dashboard de Resultados", icon=":material/bar_chart:"),
 ])
 pg.run()

@@ -22,7 +22,7 @@ pré-projeto**, abaixo, e a documentação completa em [`README.md`](../README.m
 S_i (senioridade), C_i (custo/hora), D_i (disponibilidade), A_i (ausência programada), COM_i, COL_i, ORG_i, ADA_i, EST_i (competências comportamentais), SKILL_ik (habilidade técnica k)
 
 ## Parâmetros dos projetos
-R_j (receita), H_j (horas contratadas), S_j^min, COM_j^min, COL_j^min, ORG_j^min, ADA_j^min, EST_j^min (mínimos comportamentais), N_j^max (máx. analistas), N_j^min (mín. analistas, default 1 — ver ajustes abaixo), REQ_jk (nível mínimo da habilidade k)
+R_j (receita), H_j (horas contratadas), S_j^min, COM_j^min, COL_j^min, ORG_j^min, ADA_j^min, EST_j^min (mínimos comportamentais), N_j^max (máx. analistas), N_j^min (mín. analistas, default 1 — ver ajustes abaixo), P_j (prazo em semanas, default 4 — não entra nas Equações 1-11, usado só na persistência de horas comprometidas, ver seção de premissas), REQ_jk (nível mínimo da habilidade k)
 
 ## Parâmetros gerais
 - M — big-M, vínculo entre x_ij e z_ij
@@ -62,13 +62,22 @@ Três ajustes explícitos e documentados, todos lineares, sem variáveis novas
 **Premissa nova de dados (não uma equação do MILP em si, registrada em
 06/09/2026 — pendente de redação formal na seção 6.2.2.6 do TCC):** o `D_i`
 usado na Equação 2 numa rodada de otimização é a disponibilidade **efetiva**,
-não a nominal cadastrada — `D_i_efetivo = D_i − Σ(horas em TODAS as
-execuções com situação = CONFIRMADA)`, soma cumulativa (sem segmentação por
-período/mês), calculada dinamicamente (ver
+não a nominal cadastrada — `D_i_efetivo = D_i − Σ(horas de alocações em
+execuções CONFIRMADAS cujo projeto ainda não passou do prazo)`, soma
+cumulativa (sem segmentação por período/mês), calculada dinamicamente (ver
 [`README.md`](../README.md#persistencia-de-horas-comprometidas-entre-execucoes-candidata--confirmada--encerrada)).
 Isso não muda a formulação da Equação 2 — só o valor de `D_i` que entra
-nela. As horas só voltam a ficar livres quando o gestor encerra
-explicitamente uma execução confirmada (ação registrada em 06/09/2026).
+nela.
+
+Como todo projeto tem um fim (observação registrada em 06/09/2026), as
+horas ficam livres de duas formas: **automaticamente**, quando o prazo do
+projeto (`P_j`, novo parâmetro `prazo_semanas`, contado a partir da
+confirmação) expira; ou **manualmente**, quando o gestor encerra uma
+execução confirmada antes do prazo (ex.: projeto cancelado). A expiração
+automática por data introduz uma dependência do relógio do sistema no
+resultado do solver (mesmo cenário, dias diferentes, disponibilidade
+efetiva potencialmente diferente) — um trade-off deliberado, documentado
+como limitação a citar no TCC.
 
 ## Premissas do modelo
 - Um analista pode participar de múltiplos projetos.

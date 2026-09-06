@@ -159,12 +159,15 @@ existir uma validacao de faixa de `Di` que não existia de fato no codigo):
   gestor encerra explicitamente uma execucao confirmada.
 - **Selecao de subconjunto de analistas/projetos por rodada** — o modelo
   deixa de rodar obrigatoriamente sobre todo o cadastro; o gestor escolhe
-  o escopo de cada execucao na pagina "Geracao da Alocacao".
-- **Menu lateral com 5 paginas** — reorganiza a navegacao antes descrita
+  o escopo de cada execucao no expansor "Gerar nova alocacao", dentro do
+  Dashboard de Resultados.
+- **Menu lateral com 4 paginas** — reorganiza a navegacao antes descrita
   como fluxo de rolagem continua (secao 6.2.4.1/6.2.4.2); as telas de
   habilidades tecnicas, que o texto do pre-projeto ainda trata como
   placeholder "[a ser desenvolvido]", ja' existem de fato desde a etapa
-  anterior e agora ganham pagina propria no menu.
+  anterior e agora ganham pagina propria no menu. A geracao de alocacao
+  nao tem mais pagina propria - seus controles ficam dentro do Dashboard
+  de Resultados, junto do historico de execucoes.
 
 ---
 
@@ -188,11 +191,11 @@ automaticamente na primeira execucao), com sete tabelas:
 | Tabela | Papel |
 |---|---|
 | `analistas` | cadastro de analistas (CPF, Si, Ci, Di, Ai, Big Five) |
-| `projetos` | cadastro de projetos (Rj, Hj, Sjmin, Njmax, Njmin, Big Five minimo) |
+| `projetos` | cadastro de projetos (Rj, Hj, Sjmin, Njmax, Njmin, prazo em semanas, Big Five minimo) |
 | `habilidades` | catalogo global de competencias tecnicas (nome unico, normalizado) |
 | `analista_habilidade` | associativa (chave composta `id_analista`+`id_habilidade`) — SKILLik |
 | `projeto_habilidade_requerida` | associativa (chave composta `id_projeto`+`id_habilidade`) — REQjk |
-| `execucoes` | historico de execucoes do solver (parametros, resultado agregado, situacao candidata/confirmada/encerrada, hash dos dados de entrada) |
+| `execucoes` | historico de execucoes do solver (parametros, resultado agregado, situacao candidata/confirmada/encerrada, instante de confirmacao, hash dos dados de entrada) |
 | `alocacoes` | historico detalhado de cada alocacao `x[i,j]` por execucao |
 
 Cada edicao e' salva explicitamente (botao "Salvar" em cada formulario),
@@ -209,29 +212,49 @@ Toda execucao do solver e' registrada com `situacao = candidata`. Uma previa
 pode ser gerada quantas vezes o gestor quiser sem comprometer horas de
 ninguem. Só' quando o gestor clica em **"Escolher esta alocacao"** (Dashboard
 de Resultados) a execucao passa a `situacao = confirmada` — a partir dai',
-as horas dela contam. Quando o gestor clica em **"Encerrar alocacao"**, a
-execucao passa a `situacao = encerrada` e as horas dela deixam de contar —
-essa e' a unica forma de uma disponibilidade voltar a subir (sem essa acao
-explicita, a disponibilidade efetiva só' tende a cair com o tempo).
+as horas dela contam, e `execucoes.confirmado_em` grava o instante dessa
+confirmacao (UTC).
+
+Um projeto normalmente tem fim, entao as horas comprometidas nao ficam
+presas para sempre: cada projeto tem um **prazo** (`projetos.prazo_semanas`,
+default 4). Quando `hoje ≥ confirmado_em + prazo_semanas` de um projeto
+dentro de uma execucao confirmada, aquela alocacao especifica **para de
+contar automaticamente** contra a disponibilidade do analista - sem
+precisar de nenhuma acao do gestor. O botao **"Encerrar alocacao"** continua
+disponivel para encerramento manual/antecipado (ex.: projeto cancelado
+antes do prazo); uma vez `situacao = encerrada`, as horas tambem deixam de
+contar, permanentemente.
 
 A disponibilidade **efetiva** de cada analista usada pelo modelo passa a ser:
 
 ```
-Di_efetivo = Di − Σ(horas em TODAS as execucoes com situacao = CONFIRMADA)
+Di_efetivo = Di − Σ(horas de alocacoes em execucoes CONFIRMADAS cujo
+                     projeto ainda nao passou do prazo: hoje < confirmado_em + prazo_semanas)
 ```
 
 calculada dinamicamente a cada execucao (consulta agregada sobre
-`alocacoes` + `execucoes`), e nao como coluna redundante armazenada —
-mesma logica de normalizacao da secao 7.4.5 do pre-projeto. Nao ha mais
-segmentacao por periodo/mes: a soma e' cumulativa sobre toda a historia de
-execucoes confirmadas do analista.
+`alocacoes` + `execucoes` + `projetos`), e nao como coluna redundante
+armazenada — mesma logica de normalizacao da secao 7.4.5 do pre-projeto.
+Nao ha segmentacao por periodo/mes fixo (mes/ano do calendario); o "fim"
+de cada compromisso e' determinado pelo prazo do proprio projeto.
+
+**Trade-off assumido conscientemente (registrado em 06/09/2026):** esse
+mecanismo torna a disponibilidade efetiva dependente do relogio do sistema
+no momento da consulta — rodar o mesmo cenario de cadastro em dois dias
+diferentes pode produzir disponibilidades efetivas (e portanto resultados
+do solver) diferentes, quebrando a reprodutibilidade deterministica que um
+modelo de otimizacao normalmente oferece (mesma entrada -> mesma saida,
+sempre). Foi uma escolha deliberada em troca de automatizar a liberacao de
+horas sem depender do gestor lembrar de clicar em "Encerrar alocacao". Vale
+mencionar essa limitacao explicitamente na secao de trabalhos futuros/
+limitacoes do TCC.
 
 ## Interface (Streamlit)
 
-A interface usa **menu lateral com 5 paginas** (`st.navigation`/`st.Page`,
-cada uma com um icone: pessoa, pasta, estrela, engrenagem e grafico de
-barras) e tema escuro consolidado em `.streamlit/config.toml` (uma unica
-cor de destaque, sem CSS solto no codigo):
+A interface usa **menu lateral com 4 paginas** (`st.navigation`/`st.Page`,
+cada uma com um icone: pessoa, pasta, estrela e grafico de barras) e tema
+escuro consolidado em `.streamlit/config.toml` (uma unica cor de destaque,
+sem CSS solto no codigo):
 
 1. **Cadastro de Analistas** — tabela com a listagem completa e um
    formulario de edicao individual (nome, CPF, senioridade, custo/hora,
@@ -239,17 +262,17 @@ cor de destaque, sem CSS solto no codigo):
    perfil comportamental Big Five com nome completo nos sliders).
 2. **Cadastro de Projetos** — tabela com a listagem completa e formulario
    de edicao individual (nome, receita, horas contratadas, Njmax, Njmin,
-   nivel tecnico minimo, perfil comportamental minimo exigido).
+   prazo em semanas, nivel tecnico minimo, perfil comportamental minimo
+   exigido).
 3. **Cadastro de Habilidades Tecnicas** — catalogo global de habilidades
    em uma pagina so', com duas abas: proficiencia dos analistas (SKILLik)
    e exigencia dos projetos (REQjk; REQjk = 0 equivale a "nao exigida" e
    nao gera restricao na Equacao 9).
-4. **Geracao da Alocacao** — configuracao de `h_min`, selecao de um
-   subconjunto de analistas e projetos para a rodada (por default, todo o
-   cadastro), disponibilidade efetiva (tabela), comparacao do hash dos
+4. **Dashboard de Resultados** — expansor "Gerar nova alocacao" no topo
+   (configuracao de `h_min`, selecao de um subconjunto de analistas e
+   projetos para a rodada, disponibilidade efetiva, comparacao do hash dos
    dados de entrada com a ultima execucao e botao "Reprocessar / gerar
-   previa da alocacao" (cria uma execucao `candidata`).
-5. **Dashboard de Resultados** — tabela com o historico de execucoes,
+   previa da alocacao"), seguido da tabela com o historico de execucoes,
    detalhe da execucao selecionada (lucro liquido, receita, custo,
    alocacao detalhada, projetos aceitos/recusados), botao "Escolher esta
    alocacao" (confirma) ou "Encerrar alocacao" (libera as horas) e

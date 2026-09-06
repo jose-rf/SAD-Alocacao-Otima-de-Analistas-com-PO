@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS projetos (
     nivel_min       TEXT NOT NULL,
     max_analistas   INTEGER NOT NULL DEFAULT 1,
     min_analistas   INTEGER NOT NULL DEFAULT 1,
+    prazo_semanas   INTEGER NOT NULL DEFAULT 4,
     com_min         REAL NOT NULL DEFAULT 0,
     col_min         REAL NOT NULL DEFAULT 0,
     org_min         REAL NOT NULL DEFAULT 0,
@@ -116,7 +117,8 @@ CREATE TABLE IF NOT EXISTS execucoes (
     custo_total         REAL,
     situacao            TEXT NOT NULL DEFAULT 'candidata',
     periodo_referencia  TEXT,
-    input_hash          TEXT
+    input_hash          TEXT,
+    confirmado_em       TEXT
 );
 
 CREATE TABLE IF NOT EXISTS alocacoes (
@@ -158,6 +160,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE analistas ADD COLUMN cpf TEXT NOT NULL DEFAULT ''")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_analistas_cpf ON analistas(cpf) WHERE cpf != ''")
 
+    cols_projetos = _column_names(conn, "projetos")
+    if "prazo_semanas" not in cols_projetos:
+        conn.execute("ALTER TABLE projetos ADD COLUMN prazo_semanas INTEGER NOT NULL DEFAULT 4")
+
     cols_execucoes = _column_names(conn, "execucoes")
     if "situacao" not in cols_execucoes:
         conn.execute(f"ALTER TABLE execucoes ADD COLUMN situacao TEXT NOT NULL DEFAULT '{SITUACAO_CANDIDATA}'")
@@ -165,6 +171,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE execucoes ADD COLUMN periodo_referencia TEXT")
     if "input_hash" not in cols_execucoes:
         conn.execute("ALTER TABLE execucoes ADD COLUMN input_hash TEXT")
+    if "confirmado_em" not in cols_execucoes:
+        conn.execute("ALTER TABLE execucoes ADD COLUMN confirmado_em TEXT")
 
 
 def init_db() -> None:
@@ -278,11 +286,12 @@ def list_projetos(conn: sqlite3.Connection) -> List[sqlite3.Row]:
 
 
 def insert_projeto(conn: sqlite3.Connection, dados: dict) -> int:
+    dados = {"prazo_semanas": 4, **dados}
     cur = conn.execute(
         """INSERT INTO projetos
-           (nome, receita, horas, nivel_min, max_analistas, min_analistas,
+           (nome, receita, horas, nivel_min, max_analistas, min_analistas, prazo_semanas,
             com_min, col_min, org_min, ada_min, est_min)
-           VALUES (:nome, :receita, :horas, :nivel_min, :max_analistas, :min_analistas,
+           VALUES (:nome, :receita, :horas, :nivel_min, :max_analistas, :min_analistas, :prazo_semanas,
                    :com_min, :col_min, :org_min, :ada_min, :est_min)""",
         dados,
     )
@@ -295,6 +304,7 @@ def update_projeto(conn: sqlite3.Connection, id_projeto: int, dados: dict) -> No
         """UPDATE projetos SET
              nome = :nome, receita = :receita, horas = :horas, nivel_min = :nivel_min,
              max_analistas = :max_analistas, min_analistas = :min_analistas,
+             prazo_semanas = :prazo_semanas,
              com_min = :com_min, col_min = :col_min, org_min = :org_min,
              ada_min = :ada_min, est_min = :est_min
            WHERE id_projeto = :id_projeto""",
@@ -390,30 +400,68 @@ def get_ultima_execucao(conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
 
 
 def set_situacao_execucao(conn: sqlite3.Connection, id_execucao: int, situacao: str) -> None:
-    conn.execute(
-        "UPDATE execucoes SET situacao = ? WHERE id_execucao = ?", (situacao, id_execucao)
-    )
+    if situacao == SITUACAO_CONFIRMADA:
+        # confirmado_em e' o marco a partir do qual o prazo (prazo_semanas)
+        # de cada projeto da execucao passa a contar (ver
+        # _EXPIRACAO_SQL). So' e' gravado na transicao pra CONFIRMADA -
+        # o botao que dispara essa transicao so aparece uma vez por
+        # execucao, entao nunca e' sobrescrito.
+        conn.execute(
+            "UPDATE execucoes SET situacao = ?, confirmado_em = ? WHERE id_execucao = ?",
+            (situacao, datetime.utcnow().isoformat(timespec="seconds"), id_execucao),
+        )
+    else:
+        conn.execute(
+            "UPDATE execucoes SET situacao = ? WHERE id_execucao = ?", (situacao, id_execucao)
+        )
+
+
+# Expressao SQL reutilizada: 1 se a alocacao ainda conta como hora
+# comprometida, 0 se ja' passou do prazo do projeto (prazo_semanas contado a
+# partir de execucoes.confirmado_em) ou se a execucao nao esta' confirmada.
+# Prazo automatico por data (registrado em 06/09/2026): projetos tem fim, e
+# uma vez o prazo estourado as horas do analista voltam a ficar livres sem
+# precisar de acao manual do gestor. Compara em UTC (confirmado_em e'
+# gravado com datetime.utcnow()) pra' bater com datetime('now') do SQLite.
+# Se o projeto foi excluido do cadastro (p.id_projeto IS NULL), mantem
+# contando por seguranca (nao da pra saber o prazo original).
+_EXPIRACAO_SQL = """
+    CASE
+        WHEN e.situacao != 'confirmada' THEN 0
+        WHEN e.confirmado_em IS NULL THEN 1
+        WHEN p.id_projeto IS NULL THEN 1
+        WHEN datetime(e.confirmado_em, '+' || (p.prazo_semanas * 7) || ' days') > datetime('now') THEN 1
+        ELSE 0
+    END
+"""
 
 
 def list_alocacoes_execucao(conn: sqlite3.Connection, id_execucao: int) -> List[sqlite3.Row]:
     return conn.execute(
-        "SELECT * FROM alocacoes WHERE id_execucao = ? ORDER BY id_alocacao", (id_execucao,)
+        f"""SELECT al.*, ({_EXPIRACAO_SQL}) AS ativa
+            FROM alocacoes al
+            JOIN execucoes e ON al.id_execucao = e.id_execucao
+            LEFT JOIN projetos p ON al.id_projeto = p.id_projeto
+            WHERE al.id_execucao = ?
+            ORDER BY al.id_alocacao""",
+        (id_execucao,),
     ).fetchall()
 
 
 def get_horas_comprometidas(conn: sqlite3.Connection, id_analista: int) -> float:
-    # Soma cumulativa das horas do analista em TODAS as execucoes ja'
-    # CONFIRMADAS (sem segmentar por periodo/mes): Di_efetivo = Di - horas
-    # comprometidas. Uma execucao ENCERRADA nao entra nessa soma - encerrar
-    # e' a acao explicita que libera as horas de volta pro analista.
-    # Calculado sob demanda a partir de alocacoes+execucoes, sem coluna
-    # redundante (mesma logica de normalizacao da secao 7.4.5 do TCC).
+    # Soma cumulativa das horas do analista em execucoes CONFIRMADAS cujo
+    # prazo do projeto ainda nao passou (Di_efetivo = Di - horas
+    # comprometidas). Uma execucao ENCERRADA manualmente, ou cujo prazo ja'
+    # expirou automaticamente, nao entra nessa soma. Calculado sob demanda a
+    # partir de alocacoes+execucoes+projetos, sem coluna redundante (mesma
+    # logica de normalizacao da secao 7.4.5 do TCC).
     row = conn.execute(
-        """SELECT COALESCE(SUM(al.horas), 0) AS total
-           FROM alocacoes al
-           JOIN execucoes e ON al.id_execucao = e.id_execucao
-           WHERE al.id_analista = ? AND e.situacao = ?""",
-        (id_analista, SITUACAO_CONFIRMADA),
+        f"""SELECT COALESCE(SUM(al.horas), 0) AS total
+            FROM alocacoes al
+            JOIN execucoes e ON al.id_execucao = e.id_execucao
+            LEFT JOIN projetos p ON al.id_projeto = p.id_projeto
+            WHERE al.id_analista = ? AND ({_EXPIRACAO_SQL}) = 1""",
+        (id_analista,),
     ).fetchone()
     return row["total"] or 0.0
 
@@ -446,13 +494,16 @@ def seed_dados_exemplo(conn: sqlite3.Connection) -> None:
 
     projetos = [
         dict(nome="Consultoria Fiscal", receita=90000.0, horas=240.0, nivel_min="Pleno",
-             max_analistas=3, min_analistas=1, com_min=50, col_min=0, org_min=50, ada_min=0, est_min=0,
+             max_analistas=3, min_analistas=1, prazo_semanas=8,
+             com_min=50, col_min=0, org_min=50, ada_min=0, est_min=0,
              reqs={"Tributario": 80, "Compliance": 70}),
         dict(nome="Auditoria Interna", receita=60000.0, horas=160.0, nivel_min="Senior",
-             max_analistas=2, min_analistas=1, com_min=0, col_min=0, org_min=50, ada_min=0, est_min=50,
+             max_analistas=2, min_analistas=1, prazo_semanas=6,
+             com_min=0, col_min=0, org_min=50, ada_min=0, est_min=50,
              reqs={"Auditoria": 90, "SAP": 60}),
         dict(nome="Implantacao ERP", receita=140000.0, horas=400.0, nivel_min="Junior",
-             max_analistas=4, min_analistas=2, com_min=0, col_min=50, org_min=0, ada_min=50, est_min=0,
+             max_analistas=4, min_analistas=2, prazo_semanas=16,
+             com_min=0, col_min=50, org_min=0, ada_min=50, est_min=0,
              reqs={"SAP": 85, "Power BI": 75}),
     ]
     for p in projetos:
