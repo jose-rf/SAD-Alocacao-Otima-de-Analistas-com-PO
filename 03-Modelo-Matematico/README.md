@@ -62,10 +62,13 @@ Três ajustes explícitos e documentados, todos lineares, sem variáveis novas
 **Premissa nova de dados (não uma equação do MILP em si, registrada em
 06/09/2026 — pendente de redação formal na seção 6.2.2.6 do TCC):** o `D_i`
 usado na Equação 2 numa rodada de otimização é a disponibilidade **efetiva**,
-não a nominal cadastrada — `D_i_efetivo = D_i − Σ(horas em execuções
-CONFIRMADAS do mesmo período de referência)`, calculado dinamicamente (ver
-[`README.md`](../README.md#persistencia-de-horas-comprometidas-entre-execucoes-candidata--confirmada)).
-Isso não muda a formulação da Equação 2 — só o valor de `D_i` que entra nela.
+não a nominal cadastrada — `D_i_efetivo = D_i − Σ(horas em TODAS as
+execuções com situação = CONFIRMADA)`, soma cumulativa (sem segmentação por
+período/mês), calculada dinamicamente (ver
+[`README.md`](../README.md#persistencia-de-horas-comprometidas-entre-execucoes-candidata--confirmada--encerrada)).
+Isso não muda a formulação da Equação 2 — só o valor de `D_i` que entra
+nela. As horas só voltam a ficar livres quando o gestor encerra
+explicitamente uma execução confirmada (ação registrada em 06/09/2026).
 
 ## Premissas do modelo
 - Um analista pode participar de múltiplos projetos.

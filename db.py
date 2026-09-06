@@ -11,12 +11,14 @@
 # catalogo aberto como as habilidades tecnicas.
 #
 # `execucoes.status` guarda o status do SOLVER (Optimal/Infeasible/...) e ja
-# existia. O fluxo candidata -> confirmada (secao 7.4.5 do TCC: disponibilidade
-# efetiva = Di - horas em execucoes confirmadas, calculada dinamicamente, sem
+# existia. O fluxo candidata -> confirmada -> encerrada (disponibilidade
+# efetiva = Di - horas em execucoes CONFIRMADAS, calculada dinamicamente, sem
 # coluna redundante) usa um campo proprio, `situacao`, pra nao colidir com o
-# status do solver. `periodo_referencia` (formato 'YYYY-MM') e' o mes/ano ao
-# qual uma execucao confirmada se refere, usado tanto pro teto de disponibilidade
-# por calendario quanto pro calculo de horas ja comprometidas nesse periodo.
+# status do solver. As horas comprometidas sao cumulativas (somam todas as
+# execucoes confirmadas do analista, sem segmentar por periodo/mes) - so'
+# diminuem quando o gestor encerra explicitamente uma alocacao confirmada,
+# liberando aquelas horas para as proximas rodadas. `periodo_referencia`
+# (coluna legada, sempre NULL a partir desta versao) deixou de ser usada.
 
 import re
 import sqlite3
@@ -32,6 +34,20 @@ DB_PATH = Path(__file__).parent / "alocacao.db"
 
 SITUACAO_CANDIDATA = "candidata"
 SITUACAO_CONFIRMADA = "confirmada"
+SITUACAO_ENCERRADA = "encerrada"
+
+# Teto de disponibilidade mensal: 44h semanais (art. 58 CLT), convencao
+# padrao de RH para jornada integral. Constante fixa - nao depende do
+# calendario do mes.
+TETO_HORAS_MENSAIS_CLT = 220
+
+
+def validar_disponibilidade(horas_informadas: float) -> float:
+    if horas_informadas > TETO_HORAS_MENSAIS_CLT:
+        raise ValueError(
+            f"Disponibilidade nao pode ultrapassar {TETO_HORAS_MENSAIS_CLT}h/mes (teto CLT)."
+        )
+    return horas_informadas
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS analistas (
@@ -315,7 +331,6 @@ def salvar_execucao(
     resultado: "ResultadoOtimizacao",
     id_por_nome_analista: Dict[str, int],
     id_por_nome_projeto: Dict[str, int],
-    periodo_referencia: Optional[str] = None,
     input_hash: Optional[str] = None,
 ) -> int:
     cur = conn.execute(
@@ -332,7 +347,7 @@ def salvar_execucao(
             resultado.receita_total if resultado.viavel else None,
             resultado.custo_total if resultado.viavel else None,
             SITUACAO_CANDIDATA,
-            periodo_referencia,
+            None,
             input_hash,
         ),
     )
@@ -386,17 +401,19 @@ def list_alocacoes_execucao(conn: sqlite3.Connection, id_execucao: int) -> List[
     ).fetchall()
 
 
-def get_horas_comprometidas(conn: sqlite3.Connection, id_analista: int, periodo_referencia: str) -> float:
-    # Soma as horas do analista em execucoes ja' CONFIRMADAS no mesmo periodo
-    # de referencia (Equacao 2 efetiva: Di_efetivo = Di - horas comprometidas).
+def get_horas_comprometidas(conn: sqlite3.Connection, id_analista: int) -> float:
+    # Soma cumulativa das horas do analista em TODAS as execucoes ja'
+    # CONFIRMADAS (sem segmentar por periodo/mes): Di_efetivo = Di - horas
+    # comprometidas. Uma execucao ENCERRADA nao entra nessa soma - encerrar
+    # e' a acao explicita que libera as horas de volta pro analista.
     # Calculado sob demanda a partir de alocacoes+execucoes, sem coluna
     # redundante (mesma logica de normalizacao da secao 7.4.5 do TCC).
     row = conn.execute(
         """SELECT COALESCE(SUM(al.horas), 0) AS total
            FROM alocacoes al
            JOIN execucoes e ON al.id_execucao = e.id_execucao
-           WHERE al.id_analista = ? AND e.situacao = ? AND e.periodo_referencia = ?""",
-        (id_analista, SITUACAO_CONFIRMADA, periodo_referencia),
+           WHERE al.id_analista = ? AND e.situacao = ?""",
+        (id_analista, SITUACAO_CONFIRMADA),
     ).fetchone()
     return row["total"] or 0.0
 

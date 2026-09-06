@@ -31,14 +31,16 @@ from typing import Dict, List, Optional, Tuple
 import pulp
 
 NIVEIS: Dict[str, int] = {"Junior": 1, "Pleno": 2, "Senior": 3}
-NIVEIS_LABEL: Dict[str, str] = {"Junior": "Junior", "Pleno": "Pleno", "Senior": "Senior"}
+# Chaves internas ("Junior"/"Senior") ficam sem acento de proposito - sao
+# identificadores armazenados no banco. NIVEIS_LABEL e' so' pra exibicao.
+NIVEIS_LABEL: Dict[str, str] = {"Junior": "Júnior", "Pleno": "Pleno", "Senior": "Sênior"}
 
 # competencias comportamentais baseadas no Big Five (Goldberg, 1990)
 TRAITS: Tuple[str, ...] = ("COM", "COL", "ORG", "ADA", "EST")
 TRAIT_LABELS: Dict[str, str] = {
-    "COM": "Comunicacao",
-    "COL": "Colaboracao",
-    "ORG": "Organizacao",
+    "COM": "Comunicação",
+    "COL": "Colaboração",
+    "ORG": "Organização",
     "ADA": "Adaptabilidade",
     "EST": "Estabilidade Emocional",
 }

@@ -145,16 +145,18 @@ existir uma validacao de faixa de `Di` que não existia de fato no codigo):
   validacao de formato (`000.000.000-00`) e indice `UNIQUE` parcial no
   banco (ignora valor vazio, pra' permitir a linha em branco que "+
   Adicionar analista" cria antes do preenchimento).
-- **Teto de disponibilidade por calendario** — `Di` passa a ter um teto
-  calculado como `dias_no_mes(periodo_referencia) × 24h`, com uma nota na
-  interface sugerindo um teto mais realista de jornada CLT (~220h/mes)
-  como alternativa. Isso e' o criterio real hoje — o texto do TCC precisa
-  refletir essa formula quando for atualizado.
+- **Teto de disponibilidade fixo (CLT)** — `Di` tem um teto constante,
+  `TETO_HORAS_MENSAIS_CLT = 220` (44h semanais, art. 58 da CLT, convencao
+  padrao de RH para jornada integral), sem calculo por calendario. Isso e'
+  o criterio real hoje — o texto do TCC precisa refletir essa constante
+  quando for atualizado.
 - **Persistencia de horas comprometidas entre execucoes** (candidata →
-  confirmada) — ver secao dedicada acima. E' uma premissa nova do modelo
-  de dados (nao uma equacao do MILP em si): a disponibilidade `Di` usada
-  numa rodada de otimizacao passa a descontar as horas ja' comprometidas
-  em execucoes confirmadas do mesmo periodo de referencia.
+  confirmada → encerrada) — ver secao dedicada acima. E' uma premissa nova
+  do modelo de dados (nao uma equacao do MILP em si): a disponibilidade
+  `Di` usada numa rodada de otimizacao passa a descontar, de forma
+  cumulativa, as horas ja' comprometidas em TODAS as execucoes confirmadas
+  do analista (sem segmentacao por periodo/mes) — só' diminuem quando o
+  gestor encerra explicitamente uma execucao confirmada.
 - **Selecao de subconjunto de analistas/projetos por rodada** — o modelo
   deixa de rodar obrigatoriamente sobre todo o cadastro; o gestor escolhe
   o escopo de cada execucao na pagina "Geracao da Alocacao".
@@ -169,12 +171,13 @@ existir uma validacao de faixa de `Di` que não existia de fato no codigo):
 ## Estrutura do codigo
 
 ```
-optimization.py   # modelo MILP (Equacoes 1-11) — dataclasses Analista/Projeto,
-                   # construcao e resolucao via PuLP/CBC, diagnostico de recusa
-db.py              # persistencia SQLite (schema, CRUD, seed de dados de exemplo)
-app.py             # interface Streamlit (cadastro, execucao e resultados)
-requirements.txt   # dependencias
-alocacao.db        # banco SQLite local (gerado em tempo de execucao, git-ignored)
+optimization.py         # modelo MILP (Equacoes 1-11) — dataclasses Analista/Projeto,
+                        # construcao e resolucao via PuLP/CBC, diagnostico de recusa
+db.py                   # persistencia SQLite (schema, CRUD, seed de dados de exemplo)
+app.py                  # interface Streamlit (paginas, navegacao, formularios)
+.streamlit/config.toml  # tema (cor de destaque unica, modo escuro)
+requirements.txt        # dependencias
+alocacao.db             # banco SQLite local (gerado em tempo de execucao, git-ignored)
 ```
 
 ## Persistencia (SQLite)
@@ -189,67 +192,67 @@ automaticamente na primeira execucao), com sete tabelas:
 | `habilidades` | catalogo global de competencias tecnicas (nome unico, normalizado) |
 | `analista_habilidade` | associativa (chave composta `id_analista`+`id_habilidade`) — SKILLik |
 | `projeto_habilidade_requerida` | associativa (chave composta `id_projeto`+`id_habilidade`) — REQjk |
-| `execucoes` | historico de execucoes do solver (parametros, resultado agregado, situacao candidata/confirmada, periodo de referencia, hash dos dados de entrada) |
+| `execucoes` | historico de execucoes do solver (parametros, resultado agregado, situacao candidata/confirmada/encerrada, hash dos dados de entrada) |
 | `alocacoes` | historico detalhado de cada alocacao `x[i,j]` por execucao |
 
-Cada edicao de campo na interface grava direto no banco (sem botao "salvar"
-separado); a tela sempre le o estado atual do SQLite no topo do script.
+Cada edicao e' salva explicitamente (botao "Salvar" em cada formulario),
+nao mais a cada rerun do script.
 
 `CPF` e' a chave de identificacao do analista: campo com validacao de
 formato (`000.000.000-00`) e indice `UNIQUE` parcial no banco (ignora
-CPF vazio, para permitir a linha em branco criada por "+ Adicionar
-analista" ate' o gestor preencher).
+CPF vazio, para permitir a linha em branco criada por "+ Novo analista"
+ate' o gestor preencher).
 
-## Persistencia de horas comprometidas entre execucoes (candidata → confirmada)
+## Persistencia de horas comprometidas entre execucoes (candidata → confirmada → encerrada)
 
-Toda execucao do solver e' registrada com `situacao = candidata` e um
-`periodo_referencia` (`AAAA-MM`). Uma previa pode ser gerada quantas vezes o
-gestor quiser sem comprometer horas de ninguem. Só' quando o gestor clica em
-**"Escolher esta alocacao"** (Dashboard de Resultados) a execucao passa a
-`situacao = confirmada` — a partir dai', as horas dela contam.
+Toda execucao do solver e' registrada com `situacao = candidata`. Uma previa
+pode ser gerada quantas vezes o gestor quiser sem comprometer horas de
+ninguem. Só' quando o gestor clica em **"Escolher esta alocacao"** (Dashboard
+de Resultados) a execucao passa a `situacao = confirmada` — a partir dai',
+as horas dela contam. Quando o gestor clica em **"Encerrar alocacao"**, a
+execucao passa a `situacao = encerrada` e as horas dela deixam de contar —
+essa e' a unica forma de uma disponibilidade voltar a subir (sem essa acao
+explicita, a disponibilidade efetiva só' tende a cair com o tempo).
 
 A disponibilidade **efetiva** de cada analista usada pelo modelo passa a ser:
 
 ```
-Di_efetivo = Di − Σ(horas em execucoes CONFIRMADAS do mesmo periodo_referencia)
+Di_efetivo = Di − Σ(horas em TODAS as execucoes com situacao = CONFIRMADA)
 ```
 
 calculada dinamicamente a cada execucao (consulta agregada sobre
 `alocacoes` + `execucoes`), e nao como coluna redundante armazenada —
-mesma logica de normalizacao da secao 7.4.5 do pre-projeto. As horas
-comprometidas resetam a cada novo periodo de referencia (mes/ano).
+mesma logica de normalizacao da secao 7.4.5 do pre-projeto. Nao ha mais
+segmentacao por periodo/mes: a soma e' cumulativa sobre toda a historia de
+execucoes confirmadas do analista.
 
 ## Interface (Streamlit)
 
-A interface usa **menu lateral (sidebar) com 5 paginas**, mais um seletor
-global de **periodo de referencia** (mes/ano) no topo da sidebar:
+A interface usa **menu lateral com 5 paginas** (`st.navigation`/`st.Page`,
+cada uma com um icone: pessoa, pasta, estrela, engrenagem e grafico de
+barras) e tema escuro consolidado em `.streamlit/config.toml` (uma unica
+cor de destaque, sem CSS solto no codigo):
 
-1. **Cadastro de Analistas** — cadastro dinamico com listagem: nome, CPF,
-   senioridade, custo/hora, disponibilidade (teto calculado pelo calendario
-   do periodo de referencia — `dias_no_mes × 24h` — com nota sugerindo um
-   teto mais realista de jornada CLT em torno de 220h/mes), ausencia
-   programada e perfil comportamental Big Five (sliders com nome completo:
-   Comunicacao, Colaboracao, Organizacao, Adaptabilidade, Estabilidade
-   Emocional; a sigla COM/COL/ORG/ADA/EST fica so' internamente).
-2. **Cadastro de Projetos** — cadastro dinamico com listagem: nome, receita
-   esperada, horas contratadas, numero maximo (Njmax) e minimo (Njmin) de
-   analistas, nivel tecnico minimo e perfil comportamental minimo exigido.
+1. **Cadastro de Analistas** — tabela com a listagem completa e um
+   formulario de edicao individual (nome, CPF, senioridade, custo/hora,
+   disponibilidade — teto fixo de 220h/mes, CLT —, ausencia programada e
+   perfil comportamental Big Five com nome completo nos sliders).
+2. **Cadastro de Projetos** — tabela com a listagem completa e formulario
+   de edicao individual (nome, receita, horas contratadas, Njmax, Njmin,
+   nivel tecnico minimo, perfil comportamental minimo exigido).
 3. **Cadastro de Habilidades Tecnicas** — catalogo global de habilidades
-   (`habilidades`) em uma pagina so', com duas abas: proficiencia dos
-   analistas (SKILLik, `analista_habilidade`) e exigencia dos projetos
-   (REQjk, `projeto_habilidade_requerida`; REQjk = 0 equivale a "nao
-   exigida" e nao gera restricao na Equacao 9).
-4. **Geracao da Alocacao** — configuracao de `h_min`, **selecao de um
-   subconjunto** de analistas e projetos para a rodada (por default, todo o
-   cadastro), disponibilidade efetiva do periodo (ver secao acima),
-   comparacao do hash dos dados de entrada com a ultima execucao (avisa se
-   os dados mudaram) e botao **"Reprocessar / gerar previa da alocacao"**
-   (cria uma execucao `candidata`).
-5. **Dashboard de Resultados** — historico de execucoes (selecionavel por
-   id/data/periodo/situacao), lucro liquido, receita total, custo total,
-   alocacao detalhada, projetos aceitos/recusados (motivo de recusa
-   disponivel so' para a execucao mais recente da sessao, nao persistido),
-   botao **"Escolher esta alocacao"** (confirma a execucao selecionada) e
+   em uma pagina so', com duas abas: proficiencia dos analistas (SKILLik)
+   e exigencia dos projetos (REQjk; REQjk = 0 equivale a "nao exigida" e
+   nao gera restricao na Equacao 9).
+4. **Geracao da Alocacao** — configuracao de `h_min`, selecao de um
+   subconjunto de analistas e projetos para a rodada (por default, todo o
+   cadastro), disponibilidade efetiva (tabela), comparacao do hash dos
+   dados de entrada com a ultima execucao e botao "Reprocessar / gerar
+   previa da alocacao" (cria uma execucao `candidata`).
+5. **Dashboard de Resultados** — tabela com o historico de execucoes,
+   detalhe da execucao selecionada (lucro liquido, receita, custo,
+   alocacao detalhada, projetos aceitos/recusados), botao "Escolher esta
+   alocacao" (confirma) ou "Encerrar alocacao" (libera as horas) e
    exportacao do relatorio completo em `.txt`.
 
 Dados de exemplo (ficticios, ver secao 6.1.3 do pre-projeto) sao carregados
