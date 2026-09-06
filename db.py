@@ -9,7 +9,16 @@
 # Big Five (COM/COL/ORG/ADA/EST) fica como colunas nas proprias tabelas
 # analistas/projetos por ser um perfil de tamanho fixo (5 dimensoes), nao um
 # catalogo aberto como as habilidades tecnicas.
+#
+# `execucoes.status` guarda o status do SOLVER (Optimal/Infeasible/...) e ja
+# existia. O fluxo candidata -> confirmada (secao 7.4.5 do TCC: disponibilidade
+# efetiva = Di - horas em execucoes confirmadas, calculada dinamicamente, sem
+# coluna redundante) usa um campo proprio, `situacao`, pra nao colidir com o
+# status do solver. `periodo_referencia` (formato 'YYYY-MM') e' o mes/ano ao
+# qual uma execucao confirmada se refere, usado tanto pro teto de disponibilidade
+# por calendario quanto pro calculo de horas ja comprometidas nesse periodo.
 
+import re
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -21,10 +30,14 @@ from optimization import TRAITS, ResultadoOtimizacao
 
 DB_PATH = Path(__file__).parent / "alocacao.db"
 
+SITUACAO_CANDIDATA = "candidata"
+SITUACAO_CONFIRMADA = "confirmada"
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS analistas (
     id_analista     INTEGER PRIMARY KEY AUTOINCREMENT,
     nome            TEXT NOT NULL,
+    cpf             TEXT NOT NULL DEFAULT '',
     senioridade     TEXT NOT NULL,
     custo_hora      REAL NOT NULL,
     disponibilidade REAL NOT NULL,
@@ -35,6 +48,12 @@ CREATE TABLE IF NOT EXISTS analistas (
     ada             REAL NOT NULL DEFAULT 50,
     est             REAL NOT NULL DEFAULT 50
 );
+
+-- CPF e' chave do analista (unica quando preenchido), mas a UNIQUE fica num
+-- indice parcial (nao inline na coluna): uma linha nova criada pelo botao
+-- "+ Adicionar analista" comeca com cpf='' ate' o gestor preencher, e um
+-- UNIQUE inline rejeitaria a segunda linha em branco.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_analistas_cpf ON analistas(cpf) WHERE cpf != '';
 
 CREATE TABLE IF NOT EXISTS projetos (
     id_projeto      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,14 +90,17 @@ CREATE TABLE IF NOT EXISTS projeto_habilidade_requerida (
 );
 
 CREATE TABLE IF NOT EXISTS execucoes (
-    id_execucao     INTEGER PRIMARY KEY AUTOINCREMENT,
-    executado_em    TEXT NOT NULL,
-    h_min           REAL NOT NULL,
-    status          TEXT NOT NULL,
-    viavel          INTEGER NOT NULL,
-    lucro_liquido   REAL,
-    receita_total   REAL,
-    custo_total     REAL
+    id_execucao         INTEGER PRIMARY KEY AUTOINCREMENT,
+    executado_em        TEXT NOT NULL,
+    h_min               REAL NOT NULL,
+    status              TEXT NOT NULL,
+    viavel              INTEGER NOT NULL,
+    lucro_liquido       REAL,
+    receita_total       REAL,
+    custo_total         REAL,
+    situacao            TEXT NOT NULL DEFAULT 'candidata',
+    periodo_referencia  TEXT,
+    input_hash          TEXT
 );
 
 CREATE TABLE IF NOT EXISTS alocacoes (
@@ -107,9 +129,32 @@ def get_connection() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def _column_names(conn: sqlite3.Connection, table: str) -> set:
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    # ALTER TABLE ... ADD COLUMN pra bancos criados antes destes campos
+    # existirem (CREATE TABLE IF NOT EXISTS nao adiciona coluna em tabela ja
+    # existente). Idempotente: cada ALTER so' roda se a coluna ainda nao existe.
+    cols_analistas = _column_names(conn, "analistas")
+    if "cpf" not in cols_analistas:
+        conn.execute("ALTER TABLE analistas ADD COLUMN cpf TEXT NOT NULL DEFAULT ''")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_analistas_cpf ON analistas(cpf) WHERE cpf != ''")
+
+    cols_execucoes = _column_names(conn, "execucoes")
+    if "situacao" not in cols_execucoes:
+        conn.execute(f"ALTER TABLE execucoes ADD COLUMN situacao TEXT NOT NULL DEFAULT '{SITUACAO_CANDIDATA}'")
+    if "periodo_referencia" not in cols_execucoes:
+        conn.execute("ALTER TABLE execucoes ADD COLUMN periodo_referencia TEXT")
+    if "input_hash" not in cols_execucoes:
+        conn.execute("ALTER TABLE execucoes ADD COLUMN input_hash TEXT")
+
+
 def init_db() -> None:
     with get_connection() as conn:
         conn.executescript(_SCHEMA)
+        _migrate(conn)
 
 
 # ── Habilidades (catalogo global) ────────────────────────────────────────────
@@ -158,11 +203,19 @@ def list_analistas(conn: sqlite3.Connection) -> List[sqlite3.Row]:
     return conn.execute("SELECT * FROM analistas ORDER BY id_analista").fetchall()
 
 
+CPF_REGEX = r"^\d{3}\.\d{3}\.\d{3}-\d{2}$"
+
+
+def cpf_valido(cpf: str) -> bool:
+    return bool(re.match(CPF_REGEX, cpf.strip()))
+
+
 def insert_analista(conn: sqlite3.Connection, dados: dict) -> int:
+    dados = {"cpf": "", **dados}
     cur = conn.execute(
         """INSERT INTO analistas
-           (nome, senioridade, custo_hora, disponibilidade, ausente, com, col, org, ada, est)
-           VALUES (:nome, :senioridade, :custo_hora, :disponibilidade, :ausente,
+           (nome, cpf, senioridade, custo_hora, disponibilidade, ausente, com, col, org, ada, est)
+           VALUES (:nome, :cpf, :senioridade, :custo_hora, :disponibilidade, :ausente,
                    :com, :col, :org, :ada, :est)""",
         dados,
     )
@@ -173,7 +226,7 @@ def update_analista(conn: sqlite3.Connection, id_analista: int, dados: dict) -> 
     dados = {**dados, "id_analista": id_analista}
     conn.execute(
         """UPDATE analistas SET
-             nome = :nome, senioridade = :senioridade, custo_hora = :custo_hora,
+             nome = :nome, cpf = :cpf, senioridade = :senioridade, custo_hora = :custo_hora,
              disponibilidade = :disponibilidade, ausente = :ausente,
              com = :com, col = :col, org = :org, ada = :ada, est = :est
            WHERE id_analista = :id_analista""",
@@ -262,11 +315,14 @@ def salvar_execucao(
     resultado: "ResultadoOtimizacao",
     id_por_nome_analista: Dict[str, int],
     id_por_nome_projeto: Dict[str, int],
+    periodo_referencia: Optional[str] = None,
+    input_hash: Optional[str] = None,
 ) -> int:
     cur = conn.execute(
         """INSERT INTO execucoes
-           (executado_em, h_min, status, viavel, lucro_liquido, receita_total, custo_total)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+           (executado_em, h_min, status, viavel, lucro_liquido, receita_total, custo_total,
+            situacao, periodo_referencia, input_hash)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             datetime.now().isoformat(timespec="seconds"),
             h_min,
@@ -275,6 +331,9 @@ def salvar_execucao(
             resultado.lucro_liquido if resultado.viavel else None,
             resultado.receita_total if resultado.viavel else None,
             resultado.custo_total if resultado.viavel else None,
+            SITUACAO_CANDIDATA,
+            periodo_referencia,
+            input_hash,
         ),
     )
     id_execucao = cur.lastrowid
@@ -303,10 +362,43 @@ def list_execucoes(conn: sqlite3.Connection, limit: int = 20) -> List[sqlite3.Ro
     ).fetchall()
 
 
+def get_execucao(conn: sqlite3.Connection, id_execucao: int) -> Optional[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM execucoes WHERE id_execucao = ?", (id_execucao,)
+    ).fetchone()
+
+
+def get_ultima_execucao(conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM execucoes ORDER BY id_execucao DESC LIMIT 1"
+    ).fetchone()
+
+
+def set_situacao_execucao(conn: sqlite3.Connection, id_execucao: int, situacao: str) -> None:
+    conn.execute(
+        "UPDATE execucoes SET situacao = ? WHERE id_execucao = ?", (situacao, id_execucao)
+    )
+
+
 def list_alocacoes_execucao(conn: sqlite3.Connection, id_execucao: int) -> List[sqlite3.Row]:
     return conn.execute(
         "SELECT * FROM alocacoes WHERE id_execucao = ? ORDER BY id_alocacao", (id_execucao,)
     ).fetchall()
+
+
+def get_horas_comprometidas(conn: sqlite3.Connection, id_analista: int, periodo_referencia: str) -> float:
+    # Soma as horas do analista em execucoes ja' CONFIRMADAS no mesmo periodo
+    # de referencia (Equacao 2 efetiva: Di_efetivo = Di - horas comprometidas).
+    # Calculado sob demanda a partir de alocacoes+execucoes, sem coluna
+    # redundante (mesma logica de normalizacao da secao 7.4.5 do TCC).
+    row = conn.execute(
+        """SELECT COALESCE(SUM(al.horas), 0) AS total
+           FROM alocacoes al
+           JOIN execucoes e ON al.id_execucao = e.id_execucao
+           WHERE al.id_analista = ? AND e.situacao = ? AND e.periodo_referencia = ?""",
+        (id_analista, SITUACAO_CONFIRMADA, periodo_referencia),
+    ).fetchone()
+    return row["total"] or 0.0
 
 
 # ── Dados de exemplo (seed inicial, so' roda se o banco estiver vazio) ──────
@@ -319,13 +411,13 @@ def seed_dados_exemplo(conn: sqlite3.Connection) -> None:
     ids_habilidade = {nome: add_habilidade(conn, nome) for nome in habilidades_nomes}
 
     analistas = [
-        dict(nome="Ana Souza", senioridade="Senior", custo_hora=140.0, disponibilidade=160.0,
+        dict(nome="Ana Souza", cpf="111.111.111-11", senioridade="Senior", custo_hora=140.0, disponibilidade=160.0,
              ausente=0, com=80, col=60, org=75, ada=55, est=70,
              skills={"Tributario": 85, "Auditoria": 90}),
-        dict(nome="Bruno Lima", senioridade="Pleno", custo_hora=95.0, disponibilidade=150.0,
+        dict(nome="Bruno Lima", cpf="222.222.222-22", senioridade="Pleno", custo_hora=95.0, disponibilidade=150.0,
              ausente=0, com=65, col=70, org=60, ada=80, est=50,
              skills={"SAP": 70, "Power BI": 80}),
-        dict(nome="Camila Rocha", senioridade="Senior", custo_hora=130.0, disponibilidade=150.0,
+        dict(nome="Camila Rocha", cpf="333.333.333-33", senioridade="Senior", custo_hora=130.0, disponibilidade=150.0,
              ausente=0, com=75, col=55, org=85, ada=60, est=80,
              skills={"Auditoria": 95, "SAP": 65}),
     ]

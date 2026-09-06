@@ -59,6 +59,14 @@ Três ajustes explícitos e documentados, todos lineares, sem variáveis novas
    viável), então o lucro ótimo nunca piora. Senioridade e competências
    comportamentais continuam exigidas individualmente.
 
+**Premissa nova de dados (não uma equação do MILP em si, registrada em
+06/09/2026 — pendente de redação formal na seção 6.2.2.6 do TCC):** o `D_i`
+usado na Equação 2 numa rodada de otimização é a disponibilidade **efetiva**,
+não a nominal cadastrada — `D_i_efetivo = D_i − Σ(horas em execuções
+CONFIRMADAS do mesmo período de referência)`, calculado dinamicamente (ver
+[`README.md`](../README.md#persistencia-de-horas-comprometidas-entre-execucoes-candidata--confirmada)).
+Isso não muda a formulação da Equação 2 — só o valor de `D_i` que entra nela.
+
 ## Premissas do modelo
 - Um analista pode participar de múltiplos projetos.
 - Um projeto pode ser recusado.
@@ -66,6 +74,8 @@ Três ajustes explícitos e documentados, todos lineares, sem variáveis novas
 - Todo projeto aceito tem ao menos um analista responsável.
 - Horas alocadas não ultrapassam horas contratadas.
 - Alocação respeita mínimo de horas (h_min).
+- Cada rodada de otimização pode considerar um subconjunto de analistas e
+  projetos, não necessariamente todo o cadastro (seleção feita pelo gestor).
 - Competências são fornecidas pelo gestor e permanecem constantes durante a execução do projeto.
 
 ## Matriz de competências comportamentais (Big Five → competências do sistema)

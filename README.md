@@ -132,6 +132,38 @@ de UX do SAD para tornar a recusa de um projeto compreensivel ao gestor,
 conforme o papel de "explicar a decisao ao usuario" atribuido a um SAD na
 secao 7.4.1 do pre-projeto.
 
+### Decisoes de implementacao ainda nao refletidas no texto do TCC
+
+As funcionalidades abaixo foram implementadas no protototipo mas **ainda nao
+foram atualizadas no texto do pre-projeto** (secoes 6.2.2.6, 6.2.3, 6.2.4.1,
+6.2.4.2, 6.2.6 e os diagramas UML de 6.2.7) — a recomendacao registrada e'
+sempre implementar no protototipo primeiro e so' entao atualizar o texto,
+para nao repetir o problema encontrado em 06/09/2026 (o TCC ja' afirmava
+existir uma validacao de faixa de `Di` que não existia de fato no codigo):
+
+- **CPF como chave do analista** — campo novo (`analistas.cpf`), com
+  validacao de formato (`000.000.000-00`) e indice `UNIQUE` parcial no
+  banco (ignora valor vazio, pra' permitir a linha em branco que "+
+  Adicionar analista" cria antes do preenchimento).
+- **Teto de disponibilidade por calendario** — `Di` passa a ter um teto
+  calculado como `dias_no_mes(periodo_referencia) × 24h`, com uma nota na
+  interface sugerindo um teto mais realista de jornada CLT (~220h/mes)
+  como alternativa. Isso e' o criterio real hoje — o texto do TCC precisa
+  refletir essa formula quando for atualizado.
+- **Persistencia de horas comprometidas entre execucoes** (candidata →
+  confirmada) — ver secao dedicada acima. E' uma premissa nova do modelo
+  de dados (nao uma equacao do MILP em si): a disponibilidade `Di` usada
+  numa rodada de otimizacao passa a descontar as horas ja' comprometidas
+  em execucoes confirmadas do mesmo periodo de referencia.
+- **Selecao de subconjunto de analistas/projetos por rodada** — o modelo
+  deixa de rodar obrigatoriamente sobre todo o cadastro; o gestor escolhe
+  o escopo de cada execucao na pagina "Geracao da Alocacao".
+- **Menu lateral com 5 paginas** — reorganiza a navegacao antes descrita
+  como fluxo de rolagem continua (secao 6.2.4.1/6.2.4.2); as telas de
+  habilidades tecnicas, que o texto do pre-projeto ainda trata como
+  placeholder "[a ser desenvolvido]", ja' existem de fato desde a etapa
+  anterior e agora ganham pagina propria no menu.
+
 ---
 
 ## Estrutura do codigo
@@ -152,42 +184,73 @@ automaticamente na primeira execucao), com sete tabelas:
 
 | Tabela | Papel |
 |---|---|
-| `analistas` | cadastro de analistas (Si, Ci, Di, Ai, Big Five) |
+| `analistas` | cadastro de analistas (CPF, Si, Ci, Di, Ai, Big Five) |
 | `projetos` | cadastro de projetos (Rj, Hj, Sjmin, Njmax, Njmin, Big Five minimo) |
 | `habilidades` | catalogo global de competencias tecnicas (nome unico, normalizado) |
 | `analista_habilidade` | associativa (chave composta `id_analista`+`id_habilidade`) — SKILLik |
 | `projeto_habilidade_requerida` | associativa (chave composta `id_projeto`+`id_habilidade`) — REQjk |
-| `execucoes` | historico de execucoes do solver (parametros e resultado agregado) |
+| `execucoes` | historico de execucoes do solver (parametros, resultado agregado, situacao candidata/confirmada, periodo de referencia, hash dos dados de entrada) |
 | `alocacoes` | historico detalhado de cada alocacao `x[i,j]` por execucao |
 
 Cada edicao de campo na interface grava direto no banco (sem botao "salvar"
 separado); a tela sempre le o estado atual do SQLite no topo do script.
 
+`CPF` e' a chave de identificacao do analista: campo com validacao de
+formato (`000.000.000-00`) e indice `UNIQUE` parcial no banco (ignora
+CPF vazio, para permitir a linha em branco criada por "+ Adicionar
+analista" ate' o gestor preencher).
+
+## Persistencia de horas comprometidas entre execucoes (candidata → confirmada)
+
+Toda execucao do solver e' registrada com `situacao = candidata` e um
+`periodo_referencia` (`AAAA-MM`). Uma previa pode ser gerada quantas vezes o
+gestor quiser sem comprometer horas de ninguem. Só' quando o gestor clica em
+**"Escolher esta alocacao"** (Dashboard de Resultados) a execucao passa a
+`situacao = confirmada` — a partir dai', as horas dela contam.
+
+A disponibilidade **efetiva** de cada analista usada pelo modelo passa a ser:
+
+```
+Di_efetivo = Di − Σ(horas em execucoes CONFIRMADAS do mesmo periodo_referencia)
+```
+
+calculada dinamicamente a cada execucao (consulta agregada sobre
+`alocacoes` + `execucoes`), e nao como coluna redundante armazenada —
+mesma logica de normalizacao da secao 7.4.5 do pre-projeto. As horas
+comprometidas resetam a cada novo periodo de referencia (mes/ano).
+
 ## Interface (Streamlit)
 
-A interface segue o fluxo prototipado em alta fidelidade no Figma (secao
-6.2.4.1 do pre-projeto), com duas telas adicionais dedicadas a habilidades
-tecnicas:
+A interface usa **menu lateral (sidebar) com 5 paginas**, mais um seletor
+global de **periodo de referencia** (mes/ano) no topo da sidebar:
 
-1. **Analistas** — cadastro dinamico: nome, senioridade, custo/hora,
-   disponibilidade, ausencia programada e perfil comportamental Big Five
-   (sliders).
-2. **Habilidades tecnicas dos analistas** — gerencia o catalogo global de
-   habilidades (`habilidades`) e o nivel de proficiencia (SKILLik) de cada
-   analista em cada habilidade (`analista_habilidade`).
-3. **Projetos** — cadastro dinamico: nome, receita esperada, horas
-   contratadas, numero maximo (Njmax) e minimo (Njmin) de analistas, nivel
-   tecnico minimo e perfil comportamental minimo exigido.
-4. **Habilidades tecnicas exigidas pelos projetos** — define o nivel minimo
-   exigido (REQjk) de cada projeto em cada habilidade do catalogo
-   (`projeto_habilidade_requerida`); REQjk = 0 equivale a "nao exigida" e nao
-   gera restricao (Equacao 9).
-5. **Parametros e execucao** — configuracao de `h_min` e execucao do
-   solver (PuLP/CBC); cada execucao e' registrada em `execucoes`/`alocacoes`.
-6. **Resultado** — lucro liquido, receita total, custo total, projetos
-   aceitos/total, distribuicao de horas por analista, alocacao detalhada e
-   justificativa de aceitacao/recusa de cada projeto (`y[j]`).
-7. **Exportacao** — download do relatorio completo em `.txt`.
+1. **Cadastro de Analistas** — cadastro dinamico com listagem: nome, CPF,
+   senioridade, custo/hora, disponibilidade (teto calculado pelo calendario
+   do periodo de referencia — `dias_no_mes × 24h` — com nota sugerindo um
+   teto mais realista de jornada CLT em torno de 220h/mes), ausencia
+   programada e perfil comportamental Big Five (sliders com nome completo:
+   Comunicacao, Colaboracao, Organizacao, Adaptabilidade, Estabilidade
+   Emocional; a sigla COM/COL/ORG/ADA/EST fica so' internamente).
+2. **Cadastro de Projetos** — cadastro dinamico com listagem: nome, receita
+   esperada, horas contratadas, numero maximo (Njmax) e minimo (Njmin) de
+   analistas, nivel tecnico minimo e perfil comportamental minimo exigido.
+3. **Cadastro de Habilidades Tecnicas** — catalogo global de habilidades
+   (`habilidades`) em uma pagina so', com duas abas: proficiencia dos
+   analistas (SKILLik, `analista_habilidade`) e exigencia dos projetos
+   (REQjk, `projeto_habilidade_requerida`; REQjk = 0 equivale a "nao
+   exigida" e nao gera restricao na Equacao 9).
+4. **Geracao da Alocacao** — configuracao de `h_min`, **selecao de um
+   subconjunto** de analistas e projetos para a rodada (por default, todo o
+   cadastro), disponibilidade efetiva do periodo (ver secao acima),
+   comparacao do hash dos dados de entrada com a ultima execucao (avisa se
+   os dados mudaram) e botao **"Reprocessar / gerar previa da alocacao"**
+   (cria uma execucao `candidata`).
+5. **Dashboard de Resultados** — historico de execucoes (selecionavel por
+   id/data/periodo/situacao), lucro liquido, receita total, custo total,
+   alocacao detalhada, projetos aceitos/recusados (motivo de recusa
+   disponivel so' para a execucao mais recente da sessao, nao persistido),
+   botao **"Escolher esta alocacao"** (confirma a execucao selecionada) e
+   exportacao do relatorio completo em `.txt`.
 
 Dados de exemplo (ficticios, ver secao 6.1.3 do pre-projeto) sao carregados
 automaticamente na primeira execucao, quando o banco ainda esta' vazio.
