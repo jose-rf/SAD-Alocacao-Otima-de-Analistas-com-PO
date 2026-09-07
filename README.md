@@ -132,6 +132,18 @@ de UX do SAD para tornar a recusa de um projeto compreensivel ao gestor,
 conforme o papel de "explicar a decisao ao usuario" atribuido a um SAD na
 secao 7.4.1 do pre-projeto.
 
+Essa funcao distingue dois motivos de recusa que sao facilmente confundidos
+(ajuste registrado em 07/09/2026, a partir de uma pergunta do usuario sobre
+um caso real): um projeto pode ser recusado (a) por ser deficitario mesmo
+com a equipe mais barata possivel entre os analistas elegiveis (custo
+estimado > receita — recusado mesmo sem nenhum outro projeto disputando
+horas), ou (b) por trade-off de fato (o projeto seria lucrativo isoladamente,
+mas as horas foram usadas em outro projeto aceito que rende mais). A
+funcao auxiliar `_custo_minimo_estimado()` (heuristica gulosa: analistas
+elegiveis mais baratos primeiro, ate' Njmax) computa uma estimativa de
+custo so' para decidir qual mensagem mostrar — tambem nao entra em nenhuma
+restricao do solver.
+
 ### Decisoes de implementacao ainda nao refletidas no texto do TCC
 
 As funcionalidades abaixo foram implementadas no protototipo mas **ainda nao

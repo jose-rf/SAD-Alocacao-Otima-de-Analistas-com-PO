@@ -312,6 +312,32 @@ def resolver_modelo(
     )
 
 
+def _custo_minimo_estimado(
+    elegiveis: List[Analista], horas_necessarias: float, njmin: int, njmax: int, h_min: float
+) -> Optional[float]:
+    # Heuristica gulosa (nao faz parte do modelo MILP, so' do diagnostico de
+    # recusa): estima o custo da equipe mais barata possivel pra' cobrir
+    # horas_necessarias, usando os analistas elegiveis de menor custo/hora
+    # primeiro, ate' Njmax deles. E' uma aproximacao (nao reproduz o
+    # branch-and-cut do solver), mas serve pra' distinguir "esse projeto e'
+    # deficitario mesmo com a equipe mais barata" de "havia equipe lucrativa
+    # disponivel, so' que as horas foram usadas em outro projeto".
+    candidatos = sorted(elegiveis, key=lambda a: a.custo_hora)[:njmax]
+    if len(candidatos) < njmin:
+        return None
+    custo = 0.0
+    restante = horas_necessarias
+    for a in candidatos:
+        if restante <= 0:
+            break
+        horas = min(a.disponibilidade, restante)
+        custo += horas * a.custo_hora
+        restante -= horas
+    if restante > 1e-6:
+        return None
+    return custo
+
+
 def _diagnosticar_recusa(projeto: Projeto, analistas: List[Analista], h_min: float) -> str:
     # isso aqui e so pra mostrar um motivo pro usuario na tela de resultado,
     # nao faz parte do modelo (nao entra em nenhuma restricao do solver).
@@ -354,6 +380,23 @@ def _diagnosticar_recusa(projeto: Projeto, analistas: List[Analista], h_min: flo
     if len(elegiveis) < projeto.min_analistas:
         return (f"apenas {len(elegiveis)} analista(s) elegivel(is), abaixo do minimo "
                 f"de {projeto.min_analistas} exigido pelo projeto (Njmin).")
-    return ("projeto nao selecionado pelo modelo por nao contribuir para a "
-            "maximizacao do lucro liquido diante da disponibilidade de horas "
-            "dos analistas nesse cenario (trade-off de otimizacao).")
+
+    # Distingue "o projeto e' deficitario mesmo com a equipe mais barata
+    # possivel" (recusado mesmo sem nenhum outro projeto disputando horas) de
+    # "havia equipe lucrativa disponivel, mas as horas foram usadas em outro
+    # projeto que rende mais" (recusa por trade-off de fato).
+    custo_estimado = _custo_minimo_estimado(
+        elegiveis, projeto.horas, projeto.min_analistas, projeto.max_analistas, h_min
+    )
+    if custo_estimado is not None and custo_estimado > projeto.receita:
+        return (
+            f"mesmo com a equipe mais barata possivel entre os analistas elegiveis, "
+            f"o custo estimado (R$ {custo_estimado:,.2f}) supera a receita do projeto "
+            f"(R$ {projeto.receita:,.2f}) - aceitar reduziria o lucro liquido, entao o "
+            f"modelo recusa mesmo sem nenhum outro projeto disputando essas horas."
+        )
+    return (
+        "havia equipe elegivel e o projeto seria lucrativo isoladamente, mas as horas "
+        "disponiveis dos analistas foram direcionadas a outros projetos aceitos que "
+        "rendem mais lucro liquido por hora nesse cenario (trade-off de otimizacao)."
+    )
