@@ -243,6 +243,14 @@ disponivel para encerramento manual/antecipado (ex.: projeto cancelado
 antes do prazo); uma vez `situacao = encerrada`, as horas tambem deixam de
 contar, permanentemente.
 
+Alem disso, uma execucao confirmada pode ser desfeita com o botao **"Limpar
+alocacao escolhida"** (adicionado em 07/09/2026): volta `situacao` pra'
+`candidata`, como se o clique em "Escolher esta alocacao" nunca tivesse
+acontecido, liberando as horas de volta. E' diferente de "Encerrar", que
+registra que o projeto de fato terminou/foi cancelado (fica no historico
+como `encerrada`) - "Limpar" e' pra corrigir um clique de confirmacao por
+engano ou uma mudanca de ideia antes do trabalho comecar.
+
 A disponibilidade **efetiva** de cada analista usada pelo modelo passa a ser:
 
 ```
@@ -293,8 +301,10 @@ sem CSS solto no codigo):
    previa da alocacao"), seguido da tabela com o historico de execucoes,
    detalhe da execucao selecionada (lucro liquido, receita, custo,
    alocacao detalhada, projetos aceitos/recusados), botao "Escolher esta
-   alocacao" (confirma) ou "Encerrar alocacao" (libera as horas) e
-   exportacao do relatorio completo em `.txt`.
+   alocacao" (confirma), "Limpar alocacao escolhida" (desfaz a confirmacao,
+   volta a candidata) ou "Encerrar alocacao" (marca como finalizada,
+   libera as horas permanentemente) e exportacao do relatorio completo em
+   `.txt`.
 
 Dados de exemplo (ficticios, ver secao 6.1.3 do pre-projeto) sao carregados
 automaticamente na primeira execucao, quando o banco ainda esta' vazio.

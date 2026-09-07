@@ -81,8 +81,9 @@ um expansor dentro do Dashboard de Resultados):
    soma cumulativa de horas confirmadas, sem período -, comparação de hash
    com a última execução, botão "Reprocessar / gerar prévia"), seguido de
    tabela com histórico de execuções, KPIs, alocação detalhada, botão
-   "Escolher esta alocação" (confirma) ou "Encerrar alocação" (libera as
-   horas), exportação (.txt)
+   "Escolher esta alocação" (confirma), "Limpar alocação escolhida" (desfaz
+   a confirmação, volta a candidata) ou "Encerrar alocação" (finaliza,
+   libera as horas permanentemente), exportação (.txt)
 
 ## Validação e análise de sensibilidade
 Status: a ser desenvolvido (seção 6.2.5 do pré-projeto). Planejar cenários excepcionais: ausência de analistas, recusa de projetos, conflitos de disponibilidade.

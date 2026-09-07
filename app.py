@@ -562,22 +562,31 @@ def pagina_dashboard():
         alocacoes_db = db.list_alocacoes_execucao(conn, id_execucao_sel)
 
     with st.container(border=True):
-        col_status, col_acao = st.columns([4, 1])
+        if execucao["situacao"] == db.SITUACAO_CONFIRMADA:
+            col_status, col_limpar, col_encerrar = st.columns([3, 1, 1])
+        else:
+            col_status, col_encerrar = st.columns([4, 1])
+            col_limpar = None
         col_status.markdown(f"**Situação:** {execucao['situacao']}  ·  **Status do solver:** {execucao['status']}")
         if execucao["situacao"] == db.SITUACAO_CANDIDATA:
-            if col_acao.button("Escolher esta alocação", type="primary", key="btn_confirmar", use_container_width=True):
+            if col_encerrar.button("Escolher esta alocação", type="primary", key="btn_confirmar", use_container_width=True):
                 with db.get_connection() as conn:
                     db.set_situacao_execucao(conn, id_execucao_sel, db.SITUACAO_CONFIRMADA)
                 st.success("Alocação confirmada.")
                 st.rerun()
         elif execucao["situacao"] == db.SITUACAO_CONFIRMADA:
-            if col_acao.button("Encerrar alocação", key="btn_encerrar", use_container_width=True):
+            if col_limpar.button("Limpar alocação escolhida", key="btn_limpar", use_container_width=True):
+                with db.get_connection() as conn:
+                    db.set_situacao_execucao(conn, id_execucao_sel, db.SITUACAO_CANDIDATA)
+                st.success("Confirmação desfeita. A execução voltou a ser uma prévia e as horas foram liberadas.")
+                st.rerun()
+            if col_encerrar.button("Encerrar alocação", key="btn_encerrar", use_container_width=True):
                 with db.get_connection() as conn:
                     db.set_situacao_execucao(conn, id_execucao_sel, db.SITUACAO_ENCERRADA)
                 st.success("Alocação encerrada. As horas dela foram liberadas.")
                 st.rerun()
         else:
-            col_acao.info("Encerrada")
+            col_encerrar.info("Encerrada")
 
     if not execucao["viavel"]:
         st.error(f"Execução inviável (status do solver: {execucao['status']}).")
