@@ -172,7 +172,13 @@ existir uma validacao de faixa de `Di` que não existia de fato no codigo):
 - **Selecao de subconjunto de analistas/projetos por rodada** — o modelo
   deixa de rodar obrigatoriamente sobre todo o cadastro; o gestor escolhe
   o escopo de cada execucao no expansor "Gerar nova alocacao", dentro do
-  Dashboard de Resultados.
+  Dashboard de Resultados. Projetos que ja' tem uma execucao CONFIRMADA
+  vêm desmarcados por padrao (`db.list_projetos_ja_confirmados()`), pra'
+  uma nova rodada nao reorganizar decisoes ja' tomadas so' porque o gestor
+  quer alocar um projeto novo — ajuste registrado em 07/09/2026, a partir
+  de um relato do usuario de que reprocessar estava misturando tudo de
+  novo. O gestor pode remarcar manualmente se quiser reconsiderar um
+  projeto ja' confirmado.
 - **Menu lateral com 4 paginas** — reorganiza a navegacao antes descrita
   como fluxo de rolagem continua (secao 6.2.4.1/6.2.4.2); as telas de
   habilidades tecnicas, que o texto do pre-projeto ainda trata como

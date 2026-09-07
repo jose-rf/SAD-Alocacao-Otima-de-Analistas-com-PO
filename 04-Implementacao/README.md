@@ -25,6 +25,10 @@
   automaticamente quando o prazo do projeto expira, ou manualmente ao
   encerrar uma execução confirmada) — ver seção dedicada no
   [README.md](../README.md#persistencia-de-horas-comprometidas-entre-execucoes-candidata--confirmada--encerrada)
+- `db.list_projetos_ja_confirmados()` — usada só para pré-selecionar a
+  página "Gerar nova alocação": projetos com execução confirmada vêm
+  desmarcados por padrão numa nova rodada, pra não reorganizar decisões já
+  tomadas (registrado em 07/09/2026, a partir de relato do usuário)
 - **Trade-off assumido:** a expiração automática por prazo torna a
   disponibilidade efetiva dependente da data/hora da consulta - o mesmo
   cenário rodado em dias diferentes pode dar resultados diferentes do

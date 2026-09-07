@@ -385,12 +385,18 @@ def _secao_geracao():
         niveis_por_analista = {a["id"]: db.get_niveis_analista(conn, a["id"]) for a in analistas}
         reqs_por_projeto = {p["id"]: db.get_requisitos_projeto(conn, p["id"]) for p in projetos}
         horas_comprometidas = {a["id"]: db.get_horas_comprometidas(conn, a["id"]) for a in analistas}
+        projetos_ja_confirmados = db.list_projetos_ja_confirmados(conn)
 
     with st.container(border=True):
         st.session_state.h_min = st.number_input(
             "Horas mínimas por alocação (h_min)", min_value=0, value=int(st.session_state.h_min), step=5,
         )
 
+        st.caption(
+            "Projetos já confirmados vêm desmarcados por padrão - uma nova rodada, por "
+            "padrão, decide só o que ainda está em aberto, sem reorganizar o que já foi "
+            "confirmado. Marque manualmente se quiser reconsiderar um projeto confirmado."
+        )
         c_a, c_p = st.columns(2)
         ids_analistas_sel = c_a.multiselect(
             "Analistas nesta rodada", options=[a["id"] for a in analistas],
@@ -399,8 +405,11 @@ def _secao_geracao():
         )
         ids_projetos_sel = c_p.multiselect(
             "Projetos nesta rodada", options=[p["id"] for p in projetos],
-            default=[p["id"] for p in projetos],
-            format_func=lambda i: next(p["nome"] or f"id {i}" for p in projetos if p["id"] == i),
+            default=[p["id"] for p in projetos if p["id"] not in projetos_ja_confirmados],
+            format_func=lambda i: (
+                next(p["nome"] or f"id {i}" for p in projetos if p["id"] == i)
+                + (" (já confirmado)" if i in projetos_ja_confirmados else "")
+            ),
         )
 
     analistas_sel = [a for a in analistas if a["id"] in ids_analistas_sel]

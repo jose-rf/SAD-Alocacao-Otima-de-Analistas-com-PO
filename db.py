@@ -466,6 +466,24 @@ def get_horas_comprometidas(conn: sqlite3.Connection, id_analista: int) -> float
     return row["total"] or 0.0
 
 
+def list_projetos_ja_confirmados(conn: sqlite3.Connection) -> set:
+    # Projetos com pelo menos uma alocacao numa execucao CONFIRMADA. Usado
+    # so' pra' definir a selecao PADRAO de uma nova rodada de otimizacao
+    # (pagina "Geracao da Alocacao" no Dashboard): por padrao, um projeto
+    # que ja' foi confirmado nao entra de novo, pra' nao reorganizar decisoes
+    # ja' tomadas so' porque o gestor quer alocar um projeto novo. O gestor
+    # ainda pode marcar manualmente um projeto confirmado se quiser
+    # reconsiderar (ex.: projeto encerrado e quer recomecar).
+    rows = conn.execute(
+        """SELECT DISTINCT al.id_projeto
+           FROM alocacoes al
+           JOIN execucoes e ON al.id_execucao = e.id_execucao
+           WHERE e.situacao = ? AND al.id_projeto IS NOT NULL""",
+        (SITUACAO_CONFIRMADA,),
+    ).fetchall()
+    return {r["id_projeto"] for r in rows}
+
+
 # ── Dados de exemplo (seed inicial, so' roda se o banco estiver vazio) ──────
 
 def seed_dados_exemplo(conn: sqlite3.Connection) -> None:
