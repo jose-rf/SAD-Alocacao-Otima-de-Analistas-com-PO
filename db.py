@@ -339,8 +339,6 @@ def salvar_execucao(
     conn: sqlite3.Connection,
     h_min: float,
     resultado: "ResultadoOtimizacao",
-    id_por_nome_analista: Dict[str, int],
-    id_por_nome_projeto: Dict[str, int],
     input_hash: Optional[str] = None,
 ) -> int:
     cur = conn.execute(
@@ -369,8 +367,8 @@ def salvar_execucao(
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 id_execucao,
-                id_por_nome_analista.get(a.analista),
-                id_por_nome_projeto.get(a.projeto),
+                a.id_analista,
+                a.id_projeto,
                 a.analista,
                 a.projeto,
                 a.horas,

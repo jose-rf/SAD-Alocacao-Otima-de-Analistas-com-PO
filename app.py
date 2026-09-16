@@ -382,8 +382,20 @@ def _secao_geracao():
     with db.get_connection() as conn:
         analistas = [_analista_dict(r) for r in db.list_analistas(conn)]
         projetos = [_projeto_dict(r) for r in db.list_projetos(conn)]
-        niveis_por_analista = {a["id"]: db.get_niveis_analista(conn, a["id"]) for a in analistas}
-        reqs_por_projeto = {p["id"]: db.get_requisitos_projeto(conn, p["id"]) for p in projetos}
+        # niveis_por_analista/reqs_por_projeto sao rechaveados de id_habilidade (int, chave
+        # natural no banco) para nome (str, unico no catalogo - ver habilidades.nome UNIQUE):
+        # e o nome que o motor de otimizacao usa como identificador de habilidade (K), entao
+        # e' o nome que aparece pro gestor no diagnostico de recusa (_diagnosticar_recusa),
+        # em vez do id numerico interno.
+        nome_por_id_habilidade = {h["id_habilidade"]: h["nome"] for h in db.list_habilidades(conn)}
+        niveis_por_analista = {
+            a["id"]: {nome_por_id_habilidade[k]: v for k, v in db.get_niveis_analista(conn, a["id"]).items()}
+            for a in analistas
+        }
+        reqs_por_projeto = {
+            p["id"]: {nome_por_id_habilidade[k]: v for k, v in db.get_requisitos_projeto(conn, p["id"]).items()}
+            for p in projetos
+        }
         horas_comprometidas = {a["id"]: db.get_horas_comprometidas(conn, a["id"]) for a in analistas}
         projetos_ja_confirmados = db.list_projetos_ja_confirmados(conn)
 
@@ -477,6 +489,7 @@ def _secao_geracao():
             nome=a["nome"], senioridade=a["senioridade"], custo_hora=a["custo_hora"],
             disponibilidade=max(0.0, a["disponibilidade"] - horas_comprometidas.get(a["id"], 0)),
             ausente=a["ausente"], competencias=dict(niveis_por_analista.get(a["id"], {})), big5=dict(a["big5"]),
+            id=a["id"],
         )
         for a in analistas_sel
     ] if not erros else []
@@ -485,6 +498,7 @@ def _secao_geracao():
             nome=p["nome"], receita=p["receita"], horas=p["horas"], nivel_min=p["nivel_min"],
             max_analistas=int(p["max_analistas"]), min_analistas=int(p["min_analistas"]),
             competencias_min=dict(reqs_por_projeto.get(p["id"], {})), big5_min=dict(p["big5_min"]),
+            id=p["id"],
         )
         for p in projetos_sel
     ] if not erros else []
@@ -511,11 +525,8 @@ def _secao_geracao():
         st.session_state.resultado = resultado
 
         with db.get_connection() as conn:
-            id_por_nome_analista = {a["nome"]: a["id"] for a in analistas_sel}
-            id_por_nome_projeto = {p["nome"]: p["id"] for p in projetos_sel}
             id_execucao = db.salvar_execucao(
-                conn, st.session_state.h_min, resultado, id_por_nome_analista, id_por_nome_projeto,
-                input_hash=input_hash,
+                conn, st.session_state.h_min, resultado, input_hash=input_hash,
             )
         st.session_state.ultima_execucao_id = id_execucao
         st.success(f"Prévia #{id_execucao} gerada. Veja o histórico abaixo para confirmar.")

@@ -57,6 +57,8 @@ class Analista:
     big5: Dict[str, float] = field(
         default_factory=lambda: {t: 50.0 for t in TRAITS}
     )
+    id: Optional[int] = None               # id_analista no banco (so' pra' religar o
+                                            # resultado ao registro certo - nome nao e' unico)
 
 
 @dataclass
@@ -71,6 +73,7 @@ class Projeto:
     big5_min: Dict[str, float] = field(
         default_factory=lambda: {t: 0.0 for t in TRAITS}
     )
+    id: Optional[int] = None               # id_projeto no banco (mesma razao acima)
 
 
 @dataclass
@@ -81,6 +84,8 @@ class Alocacao:
     horas: float
     custo: float
     receita: float
+    id_analista: Optional[int] = None      # id no banco (so' pra' religar o resultado
+    id_projeto: Optional[int] = None       # ao registro certo - nome nao e' unico)
 
 
 @dataclass
@@ -270,6 +275,8 @@ def resolver_modelo(
                         horas=round(horas, 2),
                         custo=round(custo, 2),
                         receita=round(receita_gerada, 2),
+                        id_analista=analistas[i].id,
+                        id_projeto=projetos[j].id,
                     )
                 )
 
