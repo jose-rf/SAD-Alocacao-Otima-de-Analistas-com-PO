@@ -141,7 +141,9 @@ def _form_analista(a):
 
         col_salvar, col_remover = st.columns([1, 1])
         if col_salvar.button("Salvar", type="primary", key=f"an_salvar_{chave}", use_container_width=True):
-            if cpf.strip() and not db.cpf_valido(cpf):
+            if not cpf.strip():
+                st.error("Informe o CPF do analista.")
+            elif not db.cpf_valido(cpf):
                 st.error("CPF em formato inválido. Use 000.000.000-00.")
             elif not nome.strip():
                 st.error("Informe o nome do analista.")
@@ -529,6 +531,13 @@ def _secao_geracao():
                 conn, st.session_state.h_min, resultado, input_hash=input_hash,
             )
         st.session_state.ultima_execucao_id = id_execucao
+        # Sobrescreve o valor guardado do selectbox de "Execucao" do Dashboard
+        # (key="dashboard_execucao_sel") ANTES dele ser instanciado mais abaixo
+        # no script: o parametro index= do st.selectbox so e' respeitado na
+        # primeira vez que o widget e' criado - em reruns seguintes o widget
+        # mantem o valor anterior por causa da key, entao sem isso o painel de
+        # detalhe continuava mostrando a execucao antiga apos gerar uma nova.
+        st.session_state["dashboard_execucao_sel"] = id_execucao
         st.success(f"Prévia #{id_execucao} gerada. Veja o histórico abaixo para confirmar.")
 
 
@@ -618,10 +627,15 @@ def pagina_dashboard():
         st.dataframe(
             pd.DataFrame([
                 {"Analista": r.nome, "Horas alocadas": r.horas_alocadas, "Disponíveis (rodada)": r.disponibilidade,
-                 "Utilização": f"{r.utilizacao * 100:.0f}%"}
+                 "Utilização": r.utilizacao * 100}
                 for r in resultado_sessao.resumo_analistas
             ]),
             use_container_width=True, hide_index=True,
+            column_config={
+                "Utilização": st.column_config.ProgressColumn(
+                    "Utilização", min_value=0, max_value=100, format="%.0f%%",
+                ),
+            },
         )
 
     def _rotulo_ativa(a):
@@ -688,8 +702,21 @@ def pagina_dashboard():
                     )
             else:
                 linhas.append("(nenhuma alocação realizada)")
+            linhas += ["", "3. PROJETOS ACEITOS E RECUSADOS", "-" * 60]
+            if tem_detalhe_sessao:
+                for nome in resultado_sessao.aceitos:
+                    linhas.append(f"- Aceito — {nome}")
+                for nome, motivo in resultado_sessao.recusados:
+                    linhas.append(f"- Recusado — {nome}: {motivo}")
+            else:
+                for nome in sorted({a["projeto_nome"] for a in alocacoes_db}):
+                    linhas.append(f"- Aceito — {nome}")
+                linhas.append(
+                    "(motivos de recusa não disponíveis: só ficam registrados na "
+                    "sessão em que a execução foi gerada)"
+                )
         linhas += [
-            "", "3. NOTA METODOLÓGICA", "-" * 60,
+            "", "4. NOTA METODOLÓGICA", "-" * 60,
             "Resultado obtido pela resolução exata do modelo de Programação Linear "
             "Inteira Mista via solver CBC (branch-and-cut), através da biblioteca PuLP. "
             "Disponibilidade de cada analista desconta horas já comprometidas em "

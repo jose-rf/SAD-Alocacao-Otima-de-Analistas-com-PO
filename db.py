@@ -93,16 +93,16 @@ CREATE TABLE IF NOT EXISTS habilidades (
 );
 
 CREATE TABLE IF NOT EXISTS analista_habilidade (
-    id_analista     INTEGER NOT NULL REFERENCES analistas(id_analista) ON DELETE CASCADE,
-    id_habilidade   INTEGER NOT NULL REFERENCES habilidades(id_habilidade) ON DELETE CASCADE,
-    nivel           REAL NOT NULL,
+    id_analista         INTEGER NOT NULL REFERENCES analistas(id_analista) ON DELETE CASCADE,
+    id_habilidade       INTEGER NOT NULL REFERENCES habilidades(id_habilidade) ON DELETE CASCADE,
+    nivel_proficiencia  REAL NOT NULL,
     PRIMARY KEY (id_analista, id_habilidade)
 );
 
 CREATE TABLE IF NOT EXISTS projeto_habilidade_requerida (
     id_projeto      INTEGER NOT NULL REFERENCES projetos(id_projeto) ON DELETE CASCADE,
     id_habilidade   INTEGER NOT NULL REFERENCES habilidades(id_habilidade) ON DELETE CASCADE,
-    nivel_minimo    REAL NOT NULL,
+    nivel_exigido   REAL NOT NULL,
     PRIMARY KEY (id_projeto, id_habilidade)
 );
 
@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS execucoes (
     situacao            TEXT NOT NULL DEFAULT 'candidata',
     periodo_referencia  TEXT,
     input_hash          TEXT,
-    confirmado_em       TEXT
+    data_confirmacao    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS alocacoes (
@@ -171,8 +171,21 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE execucoes ADD COLUMN periodo_referencia TEXT")
     if "input_hash" not in cols_execucoes:
         conn.execute("ALTER TABLE execucoes ADD COLUMN input_hash TEXT")
-    if "confirmado_em" not in cols_execucoes:
-        conn.execute("ALTER TABLE execucoes ADD COLUMN confirmado_em TEXT")
+    if "data_confirmacao" not in cols_execucoes:
+        if "confirmado_em" in cols_execucoes:
+            # renomeado pra bater com o nome usado no texto do TCC (nao e'
+            # coluna nova - banco antigo so' precisa trocar o nome)
+            conn.execute("ALTER TABLE execucoes RENAME COLUMN confirmado_em TO data_confirmacao")
+        else:
+            conn.execute("ALTER TABLE execucoes ADD COLUMN data_confirmacao TEXT")
+
+    cols_analista_habilidade = _column_names(conn, "analista_habilidade")
+    if "nivel_proficiencia" not in cols_analista_habilidade and "nivel" in cols_analista_habilidade:
+        conn.execute("ALTER TABLE analista_habilidade RENAME COLUMN nivel TO nivel_proficiencia")
+
+    cols_projeto_habilidade = _column_names(conn, "projeto_habilidade_requerida")
+    if "nivel_exigido" not in cols_projeto_habilidade and "nivel_minimo" in cols_projeto_habilidade:
+        conn.execute("ALTER TABLE projeto_habilidade_requerida RENAME COLUMN nivel_minimo TO nivel_exigido")
 
 
 def init_db() -> None:
@@ -264,17 +277,17 @@ def delete_analista(conn: sqlite3.Connection, id_analista: int) -> None:
 
 def get_niveis_analista(conn: sqlite3.Connection, id_analista: int) -> Dict[int, float]:
     rows = conn.execute(
-        "SELECT id_habilidade, nivel FROM analista_habilidade WHERE id_analista = ?",
+        "SELECT id_habilidade, nivel_proficiencia FROM analista_habilidade WHERE id_analista = ?",
         (id_analista,),
     ).fetchall()
-    return {r["id_habilidade"]: r["nivel"] for r in rows}
+    return {r["id_habilidade"]: r["nivel_proficiencia"] for r in rows}
 
 
 def set_nivel_analista(conn: sqlite3.Connection, id_analista: int, id_habilidade: int, nivel: float) -> None:
     conn.execute(
-        """INSERT INTO analista_habilidade (id_analista, id_habilidade, nivel)
+        """INSERT INTO analista_habilidade (id_analista, id_habilidade, nivel_proficiencia)
            VALUES (?, ?, ?)
-           ON CONFLICT(id_analista, id_habilidade) DO UPDATE SET nivel = excluded.nivel""",
+           ON CONFLICT(id_analista, id_habilidade) DO UPDATE SET nivel_proficiencia = excluded.nivel_proficiencia""",
         (id_analista, id_habilidade, nivel),
     )
 
@@ -318,17 +331,17 @@ def delete_projeto(conn: sqlite3.Connection, id_projeto: int) -> None:
 
 def get_requisitos_projeto(conn: sqlite3.Connection, id_projeto: int) -> Dict[int, float]:
     rows = conn.execute(
-        "SELECT id_habilidade, nivel_minimo FROM projeto_habilidade_requerida WHERE id_projeto = ?",
+        "SELECT id_habilidade, nivel_exigido FROM projeto_habilidade_requerida WHERE id_projeto = ?",
         (id_projeto,),
     ).fetchall()
-    return {r["id_habilidade"]: r["nivel_minimo"] for r in rows}
+    return {r["id_habilidade"]: r["nivel_exigido"] for r in rows}
 
 
 def set_requisito_projeto(conn: sqlite3.Connection, id_projeto: int, id_habilidade: int, nivel_minimo: float) -> None:
     conn.execute(
-        """INSERT INTO projeto_habilidade_requerida (id_projeto, id_habilidade, nivel_minimo)
+        """INSERT INTO projeto_habilidade_requerida (id_projeto, id_habilidade, nivel_exigido)
            VALUES (?, ?, ?)
-           ON CONFLICT(id_projeto, id_habilidade) DO UPDATE SET nivel_minimo = excluded.nivel_minimo""",
+           ON CONFLICT(id_projeto, id_habilidade) DO UPDATE SET nivel_exigido = excluded.nivel_exigido""",
         (id_projeto, id_habilidade, nivel_minimo),
     )
 
@@ -399,13 +412,13 @@ def get_ultima_execucao(conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
 
 def set_situacao_execucao(conn: sqlite3.Connection, id_execucao: int, situacao: str) -> None:
     if situacao == SITUACAO_CONFIRMADA:
-        # confirmado_em e' o marco a partir do qual o prazo (prazo_semanas)
+        # data_confirmacao e' o marco a partir do qual o prazo (prazo_semanas)
         # de cada projeto da execucao passa a contar (ver
         # _EXPIRACAO_SQL). So' e' gravado na transicao pra CONFIRMADA -
         # o botao que dispara essa transicao so aparece uma vez por
         # execucao, entao nunca e' sobrescrito.
         conn.execute(
-            "UPDATE execucoes SET situacao = ?, confirmado_em = ? WHERE id_execucao = ?",
+            "UPDATE execucoes SET situacao = ?, data_confirmacao = ? WHERE id_execucao = ?",
             (situacao, datetime.utcnow().isoformat(timespec="seconds"), id_execucao),
         )
     else:
@@ -416,19 +429,19 @@ def set_situacao_execucao(conn: sqlite3.Connection, id_execucao: int, situacao: 
 
 # Expressao SQL reutilizada: 1 se a alocacao ainda conta como hora
 # comprometida, 0 se ja' passou do prazo do projeto (prazo_semanas contado a
-# partir de execucoes.confirmado_em) ou se a execucao nao esta' confirmada.
+# partir de execucoes.data_confirmacao) ou se a execucao nao esta' confirmada.
 # Prazo automatico por data (registrado em 06/09/2026): projetos tem fim, e
 # uma vez o prazo estourado as horas do analista voltam a ficar livres sem
-# precisar de acao manual do gestor. Compara em UTC (confirmado_em e'
-# gravado com datetime.utcnow()) pra' bater com datetime('now') do SQLite.
+# precisar de acao manual do gestor. Compara em UTC (data_confirmacao e'
+# gravada com datetime.utcnow()) pra' bater com datetime('now') do SQLite.
 # Se o projeto foi excluido do cadastro (p.id_projeto IS NULL), mantem
 # contando por seguranca (nao da pra saber o prazo original).
 _EXPIRACAO_SQL = """
     CASE
         WHEN e.situacao != 'confirmada' THEN 0
-        WHEN e.confirmado_em IS NULL THEN 1
+        WHEN e.data_confirmacao IS NULL THEN 1
         WHEN p.id_projeto IS NULL THEN 1
-        WHEN datetime(e.confirmado_em, '+' || (p.prazo_semanas * 7) || ' days') > datetime('now') THEN 1
+        WHEN datetime(e.data_confirmacao, '+' || (p.prazo_semanas * 7) || ' days') > datetime('now') THEN 1
         ELSE 0
     END
 """
