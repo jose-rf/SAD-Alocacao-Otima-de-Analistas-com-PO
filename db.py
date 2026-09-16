@@ -484,12 +484,32 @@ def list_projetos_ja_confirmados(conn: sqlite3.Connection) -> set:
 
 # ── Dados de exemplo (seed inicial, so' roda se o banco estiver vazio) ──────
 
+def _get_or_create_habilidade(conn: sqlite3.Connection, nome: str) -> int:
+    # add_habilidade() lanca ValueError se o nome ja existe (catalogo e' UNIQUE
+    # COLLATE NOCASE) - usado aqui em vez dele porque o seed precisa ser
+    # idempotente mesmo quando so' parte dos dados de exemplo foi removida
+    # (ex.: gestor apaga todos os analistas mas mantem as habilidades).
+    nome = normalizar_nome_habilidade(nome)
+    existente = conn.execute(
+        "SELECT id_habilidade FROM habilidades WHERE nome = ? COLLATE NOCASE", (nome,)
+    ).fetchone()
+    if existente:
+        return existente["id_habilidade"]
+    return add_habilidade(conn, nome)
+
+
 def seed_dados_exemplo(conn: sqlite3.Connection) -> None:
+    # So' popula quando a tabela de analistas esta' vazia (ex.: primeira execucao,
+    # ou o gestor apagou todos os analistas pra "recomecar"). Habilidades e
+    # projetos sao tratados de forma idempotente abaixo (get-or-create / skip se
+    # ja existir por nome) porque podem ja existir mesmo com analistas vazio -
+    # sem isso, reinserir uma habilidade ja cadastrada lanca ValueError (indice
+    # UNIQUE) e derruba o app inteiro na proxima renderizacao.
     if conn.execute("SELECT COUNT(*) AS n FROM analistas").fetchone()["n"] > 0:
         return
 
     habilidades_nomes = ["Tributario", "Auditoria", "SAP", "Power BI", "Compliance"]
-    ids_habilidade = {nome: add_habilidade(conn, nome) for nome in habilidades_nomes}
+    ids_habilidade = {nome: _get_or_create_habilidade(conn, nome) for nome in habilidades_nomes}
 
     analistas = [
         dict(nome="Ana Souza", cpf="111.111.111-11", senioridade="Senior", custo_hora=140.0, disponibilidade=160.0,
@@ -524,6 +544,15 @@ def seed_dados_exemplo(conn: sqlite3.Connection) -> None:
     ]
     for p in projetos:
         reqs = p.pop("reqs")
+        # projetos.nome nao e' UNIQUE (duplicata nao lancaria erro), mas sem essa
+        # checagem o mesmo cenario acima (analistas vazios, projetos ja existentes)
+        # duplicaria "Consultoria Fiscal" etc a cada vez que o gestor esvaziasse
+        # os analistas - a checagem e' so' pra' manter o seed idempotente.
+        ja_existe = conn.execute(
+            "SELECT 1 FROM projetos WHERE nome = ?", (p["nome"],)
+        ).fetchone()
+        if ja_existe:
+            continue
         id_projeto = insert_projeto(conn, p)
         for nome_skill, nivel in reqs.items():
             set_requisito_projeto(conn, id_projeto, ids_habilidade[nome_skill], nivel)
