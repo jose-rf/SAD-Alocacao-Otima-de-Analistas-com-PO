@@ -77,7 +77,7 @@ def pagina_analistas():
         st.dataframe(
             pd.DataFrame([
                 {
-                    "Nome": a["nome"], "CPF": a["cpf"],
+                    "ID": a["id"], "Nome": a["nome"], "CPF": a["cpf"],
                     "Senioridade": NIVEIS_LABEL[a["senioridade"]],
                     "Custo/h (R$)": a["custo_hora"],
                     "Disponibilidade (h)": a["disponibilidade"],
@@ -91,7 +91,7 @@ def pagina_analistas():
         st.info("Nenhum analista cadastrado.")
 
     st.subheader("Editar analista")
-    opcoes = {a["id"]: (a["nome"] or f"Sem nome (id {a['id']})") for a in analistas}
+    opcoes = {a["id"]: f"{a['nome'] or 'Sem nome'} (id {a['id']})" for a in analistas}
     opcoes[None] = "+ Novo analista"
     id_sel = st.selectbox(
         "Selecionar", options=list(opcoes.keys()), format_func=lambda i: opcoes[i],
@@ -186,7 +186,7 @@ def pagina_projetos():
         st.dataframe(
             pd.DataFrame([
                 {
-                    "Nome": p["nome"], "Receita (R$)": p["receita"], "Horas": p["horas"],
+                    "ID": p["id"], "Nome": p["nome"], "Receita (R$)": p["receita"], "Horas": p["horas"],
                     "Nível mínimo": NIVEIS_LABEL[p["nivel_min"]],
                     "Njmax": p["max_analistas"], "Njmin": p["min_analistas"],
                     "Prazo (semanas)": p["prazo_semanas"],
@@ -199,7 +199,7 @@ def pagina_projetos():
         st.info("Nenhum projeto cadastrado.")
 
     st.subheader("Editar projeto")
-    opcoes = {p["id"]: (p["nome"] or f"Sem nome (id {p['id']})") for p in projetos}
+    opcoes = {p["id"]: f"{p['nome'] or 'Sem nome'} (id {p['id']})" for p in projetos}
     opcoes[None] = "+ Novo projeto"
     id_sel = st.selectbox(
         "Selecionar", options=list(opcoes.keys()), format_func=lambda i: opcoes[i],
@@ -415,13 +415,15 @@ def _secao_geracao():
         ids_analistas_sel = c_a.multiselect(
             "Analistas nesta rodada", options=[a["id"] for a in analistas],
             default=[a["id"] for a in analistas],
-            format_func=lambda i: next(a["nome"] or f"id {i}" for a in analistas if a["id"] == i),
+            format_func=lambda i: (
+                f"{next(a['nome'] or 'Sem nome' for a in analistas if a['id'] == i)} (id {i})"
+            ),
         )
         ids_projetos_sel = c_p.multiselect(
             "Projetos nesta rodada", options=[p["id"] for p in projetos],
             default=[p["id"] for p in projetos if p["id"] not in projetos_ja_confirmados],
             format_func=lambda i: (
-                next(p["nome"] or f"id {i}" for p in projetos if p["id"] == i)
+                f"{next(p['nome'] or 'Sem nome' for p in projetos if p['id'] == i)} (id {i})"
                 + (" (já confirmado)" if i in projetos_ja_confirmados else "")
             ),
         )
@@ -610,6 +612,8 @@ def pagina_dashboard():
 
     if not execucao["viavel"]:
         st.error(f"Execução inviável (status do solver: {execucao['status']}).")
+        if execucao["tempo_processamento_s"] is not None:
+            st.caption(f"Tempo de processamento CBC (s): {execucao['tempo_processamento_s']:.3f}")
         return
 
     margem = (execucao["lucro_liquido"] / execucao["receita_total"] * 100) if execucao["receita_total"] else 0.0
@@ -618,6 +622,12 @@ def pagina_dashboard():
     k2.metric("Receita total", f"R$ {execucao['receita_total']:,.2f}")
     k3.metric("Custo total", f"R$ {execucao['custo_total']:,.2f}")
     k4.metric("Projetos aceitos", f"{len({a['projeto_nome'] for a in alocacoes_db})}")
+
+    k5, k6 = st.columns(2)
+    taxa_ocupacao = execucao["taxa_ocupacao_equipe"]
+    tempo_cbc = execucao["tempo_processamento_s"]
+    k5.metric("Taxa de Ocupação da Equipe (%)", f"{taxa_ocupacao:.1f}%" if taxa_ocupacao is not None else "—")
+    k6.metric("Tempo de Processamento CBC (s)", f"{tempo_cbc:.3f}" if tempo_cbc is not None else "—")
 
     resultado_sessao = st.session_state.resultado
     tem_detalhe_sessao = resultado_sessao is not None and st.session_state.ultima_execucao_id == id_execucao_sel
@@ -675,6 +685,8 @@ def pagina_dashboard():
     st.subheader("Exportação do relatório")
 
     def _montar_relatorio_txt() -> str:
+        tempo_cbc = execucao["tempo_processamento_s"]
+        tempo_cbc_fmt = f"{tempo_cbc:.3f}s" if tempo_cbc is not None else "—"
         linhas = [
             "RELATÓRIO DE ALOCAÇÃO ÓTIMA DE ANALISTAS",
             "Sistema de Apoio à Decisão - Programação Linear Inteira Mista (PuLP/CBC)",
@@ -682,16 +694,20 @@ def pagina_dashboard():
             f"Execução #{execucao['id_execucao']} - {execucao['executado_em']}",
             f"Situação: {execucao['situacao']}",
             f"Parâmetro h_min: {execucao['h_min']}h",
+            f"Tempo de processamento CBC: {tempo_cbc_fmt}",
             "",
             "1. RESULTADO GERAL", "-" * 60,
         ]
         if not execucao["viavel"]:
             linhas.append(f"Modelo inviável (status: {execucao['status']}).")
         else:
+            taxa_ocupacao = execucao["taxa_ocupacao_equipe"]
+            taxa_ocupacao_fmt = f"{taxa_ocupacao:.1f}%" if taxa_ocupacao is not None else "—"
             linhas += [
                 f"Lucro líquido total: R$ {execucao['lucro_liquido']:,.2f}",
                 f"Receita total: R$ {execucao['receita_total']:,.2f}",
                 f"Custo total alocado: R$ {execucao['custo_total']:,.2f}",
+                f"Taxa de ocupação da equipe: {taxa_ocupacao_fmt}",
                 "", "2. ALOCAÇÃO DETALHADA", "-" * 60,
             ]
             if alocacoes_db:

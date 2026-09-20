@@ -115,10 +115,12 @@ CREATE TABLE IF NOT EXISTS execucoes (
     lucro_liquido       REAL,
     receita_total       REAL,
     custo_total         REAL,
-    situacao            TEXT NOT NULL DEFAULT 'candidata',
-    periodo_referencia  TEXT,
-    input_hash          TEXT,
-    data_confirmacao    TEXT
+    situacao              TEXT NOT NULL DEFAULT 'candidata',
+    periodo_referencia    TEXT,
+    input_hash            TEXT,
+    data_confirmacao      TEXT,
+    tempo_processamento_s REAL,
+    taxa_ocupacao_equipe  REAL
 );
 
 CREATE TABLE IF NOT EXISTS alocacoes (
@@ -190,6 +192,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE execucoes RENAME COLUMN confirmado_em TO data_confirmacao")
         else:
             conn.execute("ALTER TABLE execucoes ADD COLUMN data_confirmacao TEXT")
+    if "tempo_processamento_s" not in cols_execucoes:
+        conn.execute("ALTER TABLE execucoes ADD COLUMN tempo_processamento_s REAL")
+    if "taxa_ocupacao_equipe" not in cols_execucoes:
+        conn.execute("ALTER TABLE execucoes ADD COLUMN taxa_ocupacao_equipe REAL")
 
     cols_analista_habilidade = _column_names(conn, "analista_habilidade")
     if "nivel_proficiencia" not in cols_analista_habilidade and "nivel" in cols_analista_habilidade:
@@ -385,8 +391,8 @@ def salvar_execucao(
     cur = conn.execute(
         """INSERT INTO execucoes
            (executado_em, h_min, status, viavel, lucro_liquido, receita_total, custo_total,
-            situacao, periodo_referencia, input_hash)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            situacao, periodo_referencia, input_hash, tempo_processamento_s, taxa_ocupacao_equipe)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             datetime.now().isoformat(timespec="seconds"),
             h_min,
@@ -398,6 +404,8 @@ def salvar_execucao(
             SITUACAO_CANDIDATA,
             None,
             input_hash,
+            resultado.tempo_processamento_s,
+            resultado.taxa_ocupacao_equipe if resultado.viavel else None,
         ),
     )
     id_execucao = cur.lastrowid

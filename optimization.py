@@ -25,6 +25,7 @@
 #   y[j]   -> projeto j aceito ou nao (binaria)
 #   z[i,j] -> analista i vinculado ao projeto j (binaria)
 
+import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -112,6 +113,8 @@ class ResultadoOtimizacao:
     aceitos: List[str]
     recusados: List[Tuple[str, str]]        # (nome_projeto, motivo)
     resumo_analistas: List[ResumoAnalista]
+    tempo_processamento_s: float = 0.0      # tempo de resolucao do solver CBC, em segundos
+    taxa_ocupacao_equipe: float = 0.0       # soma(horas_alocadas)/soma(disponibilidade) * 100, entre os analistas da rodada
 
 
 def _calcular_big_m(analistas: List[Analista], projetos: List[Projeto]) -> float:
@@ -240,7 +243,9 @@ def resolver_modelo(
 
     # Eq 11 - x[i,j] >= 0 ja garantido pelo lowBound la em cima
 
+    t0 = time.perf_counter()
     prob.solve(pulp.PULP_CBC_CMD(msg=0))
+    tempo_processamento_s = time.perf_counter() - t0
     status = pulp.LpStatus[prob.status]
     viavel = status == "Optimal"
 
@@ -257,6 +262,7 @@ def resolver_modelo(
                                  "alocacoes que satisfaca simultaneamente todas "
                                  "as restricoes.") for p in projetos],
             resumo_analistas=[],
+            tempo_processamento_s=round(tempo_processamento_s, 3),
         )
 
     alocacoes: List[Alocacao] = []
@@ -306,6 +312,14 @@ def resolver_modelo(
     custo_total = sum(a.custo for a in alocacoes)
     lucro_liquido = pulp.value(prob.objective) or 0.0
 
+    # Taxa de ocupacao da equipe: soma das horas alocadas sobre soma da
+    # disponibilidade de TODOS os analistas que participaram da rodada (nao
+    # so' os que efetivamente receberam horas) - mede o quanto da capacidade
+    # disponivel da equipe selecionada o modelo conseguiu aproveitar.
+    disp_total = sum(r.disponibilidade for r in resumo_analistas)
+    horas_total = sum(r.horas_alocadas for r in resumo_analistas)
+    taxa_ocupacao_equipe = (horas_total / disp_total * 100) if disp_total > 0 else 0.0
+
     return ResultadoOtimizacao(
         status=status,
         viavel=True,
@@ -316,6 +330,8 @@ def resolver_modelo(
         aceitos=aceitos,
         recusados=recusados,
         resumo_analistas=resumo_analistas,
+        tempo_processamento_s=round(tempo_processamento_s, 3),
+        taxa_ocupacao_equipe=round(taxa_ocupacao_equipe, 2),
     )
 
 
