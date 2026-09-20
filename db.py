@@ -132,6 +132,18 @@ CREATE TABLE IF NOT EXISTS alocacoes (
     custo           REAL NOT NULL,
     receita         REAL NOT NULL
 );
+
+-- Flag persistente de "os dados de exemplo ja foram carregados alguma vez".
+-- Existe so' pra' impedir que seed_dados_exemplo() rode de novo quando o
+-- gestor esvazia o cadastro de proposito (ex.: apaga todos os analistas pra
+-- comecar do zero) - sem essa marca, o sistema nao teria como distinguir
+-- "banco realmente vazio pela primeira vez" de "gestor esvaziou de proposito",
+-- e recolocava os dados de exemplo sozinho a cada rerun (comportamento
+-- indesejado reportado pelo gestor em 20/09/2026).
+CREATE TABLE IF NOT EXISTS app_meta (
+    chave   TEXT PRIMARY KEY,
+    valor   TEXT NOT NULL
+);
 """
 
 
@@ -186,6 +198,22 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols_projeto_habilidade = _column_names(conn, "projeto_habilidade_requerida")
     if "nivel_exigido" not in cols_projeto_habilidade and "nivel_minimo" in cols_projeto_habilidade:
         conn.execute("ALTER TABLE projeto_habilidade_requerida RENAME COLUMN nivel_minimo TO nivel_exigido")
+
+    # Bancos que ja existiam antes da flag app_meta.seed_executado: se ja tem
+    # analista cadastrado (seed anterior ou dado real do gestor), marca como
+    # "ja executado" pra nao reseedar por engano na proxima vez que o gestor
+    # esvaziar o cadastro. Se o banco ja estava vazio, deixa sem marcar - o
+    # seed ainda roda normalmente na proxima inicializacao (primeira vez de
+    # verdade).
+    ja_marcado = conn.execute(
+        "SELECT 1 FROM app_meta WHERE chave = 'seed_executado'"
+    ).fetchone()
+    if not ja_marcado:
+        tem_analista = conn.execute("SELECT COUNT(*) AS n FROM analistas").fetchone()["n"] > 0
+        if tem_analista:
+            conn.execute(
+                "INSERT INTO app_meta (chave, valor) VALUES ('seed_executado', '1')"
+            )
 
 
 def init_db() -> None:
@@ -512,14 +540,22 @@ def _get_or_create_habilidade(conn: sqlite3.Connection, nome: str) -> int:
 
 
 def seed_dados_exemplo(conn: sqlite3.Connection) -> None:
-    # So' popula quando a tabela de analistas esta' vazia (ex.: primeira execucao,
-    # ou o gestor apagou todos os analistas pra "recomecar"). Habilidades e
-    # projetos sao tratados de forma idempotente abaixo (get-or-create / skip se
-    # ja existir por nome) porque podem ja existir mesmo com analistas vazio -
-    # sem isso, reinserir uma habilidade ja cadastrada lanca ValueError (indice
-    # UNIQUE) e derruba o app inteiro na proxima renderizacao.
-    if conn.execute("SELECT COUNT(*) AS n FROM analistas").fetchone()["n"] > 0:
+    # So' popula na PRIMEIRA vez que o banco e' inicializado de verdade - nunca
+    # mais depois disso, controlado por app_meta.seed_executado (nao mais por
+    # "analistas esta vazio"). Antes disso era baseado so' na contagem de
+    # analistas, o que tinha um efeito colateral indesejado: se o gestor
+    # apagava TODOS os analistas de proposito (pra comecar do zero), o
+    # proximo rerun via essa tabela vazia como "primeira execucao" e
+    # recolocava os dados de exemplo sozinho - o gestor nunca conseguia
+    # manter o cadastro vazio. Reportado em 20/09/2026.
+    ja_executou = conn.execute(
+        "SELECT 1 FROM app_meta WHERE chave = 'seed_executado'"
+    ).fetchone()
+    if ja_executou:
         return
+    conn.execute(
+        "INSERT INTO app_meta (chave, valor) VALUES ('seed_executado', '1')"
+    )
 
     habilidades_nomes = ["Tributario", "Auditoria", "SAP", "Power BI", "Compliance"]
     ids_habilidade = {nome: _get_or_create_habilidade(conn, nome) for nome in habilidades_nomes}
