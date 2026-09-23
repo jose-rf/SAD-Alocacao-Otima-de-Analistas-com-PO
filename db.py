@@ -20,6 +20,7 @@
 # liberando aquelas horas para as proximas rodadas. `periodo_referencia`
 # (coluna legada, sempre NULL a partir desta versao) deixou de ser usada.
 
+import os
 import re
 import sqlite3
 from contextlib import contextmanager
@@ -28,9 +29,24 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional
 
+try:
+    import libsql_client
+except ImportError:
+    libsql_client = None
+
 from optimization import TRAITS, ResultadoOtimizacao
 
 DB_PATH = Path(__file__).parent / "alocacao.db"
+
+# Persistencia remota opcional (Turso/libSQL) - contorna a limitacao do
+# Streamlit Community Cloud de nao ter disco persistente (o container e'
+# recriado do zero a cada rebuild/reboot, apagando qualquer arquivo local
+# como o alocacao.db). Se TURSO_DATABASE_URL e TURSO_AUTH_TOKEN estiverem
+# definidos (via variavel de ambiente OU st.secrets, que o Streamlit expoe
+# como variavel de ambiente automaticamente), os dados passam a viver num
+# banco libSQL remoto e sobrevivem a qualquer rebuild. Sem essas variaveis,
+# comportamento 100% igual a antes (arquivo SQLite local) - nao quebra
+# nenhum uso local/de teste existente.
 
 SITUACAO_CANDIDATA = "candidata"
 SITUACAO_CONFIRMADA = "confirmada"
@@ -149,11 +165,77 @@ CREATE TABLE IF NOT EXISTS app_meta (
 """
 
 
+def _turso_config():
+    url = os.environ.get("TURSO_DATABASE_URL")
+    token = os.environ.get("TURSO_AUTH_TOKEN")
+    return (url, token) if url and token else None
+
+
+class _LibsqlCursor:
+    # Imita o suficiente de sqlite3.Cursor pro resto do db.py funcionar sem
+    # precisar saber se esta' falando com SQLite local ou libSQL remoto:
+    # fetchone/fetchall, iteracao direta (usado em _column_names) e lastrowid.
+    # As linhas do libsql_client ja suportam row["coluna"] e row[indice],
+    # equivalente ao sqlite3.Row usado no resto do arquivo.
+    def __init__(self, result_set):
+        self._rows = list(result_set.rows)
+        self.lastrowid = result_set.last_insert_rowid
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    def fetchall(self):
+        return self._rows
+
+    def __iter__(self):
+        return iter(self._rows)
+
+
+def _split_sql_statements(script: str) -> List[str]:
+    # _SCHEMA so' tem CREATE TABLE/INDEX simples (sem ';' dentro de strings,
+    # triggers ou blocos PL/pgSQL), entao dividir por ';' e' seguro aqui.
+    return [s.strip() for s in script.split(";") if s.strip()]
+
+
+class _LibsqlConnection:
+    # Adaptador minimo pra' get_connection() poder devolver algo com a mesma
+    # API usada em todo o resto do db.py (conn.execute(...).fetchone()/
+    # fetchall(), conn.executescript(...), cur.lastrowid) quando o banco e'
+    # um libSQL remoto (Turso) em vez de um arquivo SQLite local. libsql_client
+    # ja faz autocommit por statement (nao tem .commit()), entao commit() aqui
+    # e' so' um no-op pra manter a mesma interface do bloco `with` abaixo.
+    def __init__(self, client):
+        self._client = client
+
+    def execute(self, sql, params=None):
+        return _LibsqlCursor(self._client.execute(sql, params if params is not None else []))
+
+    def executescript(self, script):
+        self._client.batch(_split_sql_statements(script))
+
+    def commit(self):
+        pass
+
+    def close(self):
+        self._client.close()
+
+
 @contextmanager
 def get_connection() -> Iterator[sqlite3.Connection]:
-    conn = sqlite3.connect(DB_PATH)
+    turso = _turso_config()
+    if turso:
+        if libsql_client is None:
+            raise RuntimeError(
+                "TURSO_DATABASE_URL/TURSO_AUTH_TOKEN configurados, mas o pacote "
+                "libsql-client nao esta instalado (adicione 'libsql-client' ao "
+                "requirements.txt)."
+            )
+        url, token = turso
+        conn = _LibsqlConnection(libsql_client.create_client_sync(url=url, auth_token=token))
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.row_factory = sqlite3.Row
     try:
         yield conn
         conn.commit()
@@ -265,6 +347,16 @@ def rename_habilidade(conn: sqlite3.Connection, id_habilidade: int, novo_nome: s
 
 
 def delete_habilidade(conn: sqlite3.Connection, id_habilidade: int) -> None:
+    # Limpeza em cascata feita explicitamente aqui (nao delegada ao ON DELETE
+    # CASCADE do schema) porque o backend libSQL/Turso opcional (ver
+    # get_connection) nao demonstrou aplicar cascata de forma confiavel nos
+    # testes locais - o app.py nao pode depender de um comportamento do
+    # banco que nao da' pra' verificar contra o Turso real neste ambiente.
+    # Idempotente com o ON DELETE CASCADE do SQLite local (que funciona e
+    # continua declarado no schema): aqui ja' apaga tudo, entao a cascata,
+    # quando existe, so' roda sobre um conjunto vazio.
+    conn.execute("DELETE FROM analista_habilidade WHERE id_habilidade = ?", (id_habilidade,))
+    conn.execute("DELETE FROM projeto_habilidade_requerida WHERE id_habilidade = ?", (id_habilidade,))
     conn.execute("DELETE FROM habilidades WHERE id_habilidade = ?", (id_habilidade,))
 
 
@@ -306,6 +398,9 @@ def update_analista(conn: sqlite3.Connection, id_analista: int, dados: dict) -> 
 
 
 def delete_analista(conn: sqlite3.Connection, id_analista: int) -> None:
+    # Cascata explicita - ver comentario em delete_habilidade().
+    conn.execute("DELETE FROM analista_habilidade WHERE id_analista = ?", (id_analista,))
+    conn.execute("UPDATE alocacoes SET id_analista = NULL WHERE id_analista = ?", (id_analista,))
     conn.execute("DELETE FROM analistas WHERE id_analista = ?", (id_analista,))
 
 
@@ -360,6 +455,9 @@ def update_projeto(conn: sqlite3.Connection, id_projeto: int, dados: dict) -> No
 
 
 def delete_projeto(conn: sqlite3.Connection, id_projeto: int) -> None:
+    # Cascata explicita - ver comentario em delete_habilidade().
+    conn.execute("DELETE FROM projeto_habilidade_requerida WHERE id_projeto = ?", (id_projeto,))
+    conn.execute("UPDATE alocacoes SET id_projeto = NULL WHERE id_projeto = ?", (id_projeto,))
     conn.execute("DELETE FROM projetos WHERE id_projeto = ?", (id_projeto,))
 
 

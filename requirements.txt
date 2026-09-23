@@ -1,3 +1,4 @@
 streamlit>=1.36
 pulp>=2.7
 pandas>=2.0
+libsql-client>=0.3
