@@ -625,6 +625,25 @@ def get_niveis_analista(conn: sqlite3.Connection, id_analista: int) -> Dict[int,
     return {r["id_habilidade"]: r["nivel_proficiencia"] for r in rows}
 
 
+def get_niveis_todos_analistas(conn: sqlite3.Connection) -> Dict[int, Dict[int, float]]:
+    # Versao "em lote" de get_niveis_analista: 1 query pra' todos os
+    # analistas, em vez de 1 por analista. Existe porque _secao_geracao()
+    # (app.py) precisava dos niveis de TODOS os analistas de uma vez pra'
+    # montar o modelo, e chamar get_niveis_analista() num loop virava N
+    # idas-e-voltas ao banco a cada rerun do Streamlit - imperceptivel em
+    # SQLite local, mas visivelmente lento (tela "esmaecendo" enquanto
+    # carrega) contra um banco remoto (Postgres/Turso), onde cada
+    # ida-e-volta tem latencia de rede real. Relatado pelo usuario em
+    # 23/09/2026 apos a migracao pra Supabase.
+    rows = conn.execute(
+        "SELECT id_analista, id_habilidade, nivel_proficiencia FROM analista_habilidade"
+    ).fetchall()
+    resultado: Dict[int, Dict[int, float]] = {}
+    for r in rows:
+        resultado.setdefault(r["id_analista"], {})[r["id_habilidade"]] = r["nivel_proficiencia"]
+    return resultado
+
+
 def set_nivel_analista(conn: sqlite3.Connection, id_analista: int, id_habilidade: int, nivel: float) -> None:
     conn.execute(
         """INSERT INTO analista_habilidade (id_analista, id_habilidade, nivel_proficiencia)
@@ -680,6 +699,18 @@ def get_requisitos_projeto(conn: sqlite3.Connection, id_projeto: int) -> Dict[in
         (id_projeto,),
     ).fetchall()
     return {r["id_habilidade"]: r["nivel_exigido"] for r in rows}
+
+
+def get_requisitos_todos_projetos(conn: sqlite3.Connection) -> Dict[int, Dict[int, float]]:
+    # Versao "em lote" de get_requisitos_projeto - ver comentario em
+    # get_niveis_todos_analistas().
+    rows = conn.execute(
+        "SELECT id_projeto, id_habilidade, nivel_exigido FROM projeto_habilidade_requerida"
+    ).fetchall()
+    resultado: Dict[int, Dict[int, float]] = {}
+    for r in rows:
+        resultado.setdefault(r["id_projeto"], {})[r["id_habilidade"]] = r["nivel_exigido"]
+    return resultado
 
 
 def set_requisito_projeto(conn: sqlite3.Connection, id_projeto: int, id_habilidade: int, nivel_minimo: float) -> None:
@@ -842,6 +873,21 @@ def get_horas_comprometidas(conn: sqlite3.Connection, id_analista: int) -> float
         (id_analista,),
     ).fetchone()
     return row["total"] or 0.0
+
+
+def get_horas_comprometidas_todos_analistas(conn: sqlite3.Connection) -> Dict[int, float]:
+    # Versao "em lote" de get_horas_comprometidas (GROUP BY id_analista em
+    # vez de 1 query por analista) - ver comentario em
+    # get_niveis_todos_analistas(). Mesma logica de expiracao de prazo.
+    rows = conn.execute(
+        f"""SELECT al.id_analista AS id_analista, COALESCE(SUM(al.horas), 0) AS total
+            FROM alocacoes al
+            JOIN execucoes e ON al.id_execucao = e.id_execucao
+            LEFT JOIN projetos p ON al.id_projeto = p.id_projeto
+            WHERE al.id_analista IS NOT NULL AND ({_expiracao_sql(conn)}) = 1
+            GROUP BY al.id_analista"""
+    ).fetchall()
+    return {r["id_analista"]: r["total"] or 0.0 for r in rows}
 
 
 def list_projetos_ja_confirmados(conn: sqlite3.Connection) -> set:

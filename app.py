@@ -416,15 +416,23 @@ def _secao_geracao():
         # e' o nome que aparece pro gestor no diagnostico de recusa (_diagnosticar_recusa),
         # em vez do id numerico interno.
         nome_por_id_habilidade = {h["id_habilidade"]: h["nome"] for h in db.list_habilidades(conn)}
+        # Consultas em lote (1 query cada, nao 1 por analista/projeto) - com
+        # banco remoto (Postgres/Turso) a versao antiga (get_niveis_analista/
+        # get_requisitos_projeto/get_horas_comprometidas chamadas num loop)
+        # virava dezenas de idas-e-voltas de rede a cada rerun do Streamlit,
+        # visivel como a tela "esmaecendo" enquanto carrega.
+        niveis_todos = db.get_niveis_todos_analistas(conn)
+        reqs_todos = db.get_requisitos_todos_projetos(conn)
+        horas_todas = db.get_horas_comprometidas_todos_analistas(conn)
         niveis_por_analista = {
-            a["id"]: {nome_por_id_habilidade[k]: v for k, v in db.get_niveis_analista(conn, a["id"]).items()}
+            a["id"]: {nome_por_id_habilidade[k]: v for k, v in niveis_todos.get(a["id"], {}).items()}
             for a in analistas
         }
         reqs_por_projeto = {
-            p["id"]: {nome_por_id_habilidade[k]: v for k, v in db.get_requisitos_projeto(conn, p["id"]).items()}
+            p["id"]: {nome_por_id_habilidade[k]: v for k, v in reqs_todos.get(p["id"], {}).items()}
             for p in projetos
         }
-        horas_comprometidas = {a["id"]: db.get_horas_comprometidas(conn, a["id"]) for a in analistas}
+        horas_comprometidas = {a["id"]: horas_todas.get(a["id"], 0.0) for a in analistas}
         projetos_ja_confirmados = db.list_projetos_ja_confirmados(conn)
 
     with st.container(border=True):
