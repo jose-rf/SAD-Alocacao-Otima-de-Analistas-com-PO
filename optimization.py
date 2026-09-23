@@ -401,8 +401,8 @@ def _diagnosticar_recusa(projeto: Projeto, analistas: List[Analista], h_min: flo
         return ("a capacidade agregada de horas dos analistas elegiveis e menor que "
                 "as horas contratadas do projeto.")
     if len(elegiveis) < projeto.min_analistas:
-        return (f"apenas {len(elegiveis)} analista(s) elegivel(is), abaixo do minimo "
-                f"de {projeto.min_analistas} exigido pelo projeto (Njmin).")
+        return (f"apenas {len(elegiveis)} analista(s) elegivel(is), abaixo do numero minimo "
+                f"de analistas exigido pelo projeto ({projeto.min_analistas}).")
 
     # Distingue "o projeto e' deficitario mesmo com a equipe mais barata
     # possivel" (recusado mesmo sem nenhum outro projeto disputando horas) de

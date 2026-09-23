@@ -204,12 +204,20 @@ def pagina_projetos():
                 {
                     "ID": p["id"], "Nome": p["nome"], "Receita (R$)": p["receita"], "Horas": p["horas"],
                     "Nível mínimo": NIVEIS_LABEL[p["nivel_min"]],
-                    "Njmax": p["max_analistas"], "Njmin": p["min_analistas"],
+                    "Nº máx. de analistas": p["max_analistas"], "Nº mín. de analistas": p["min_analistas"],
                     "Prazo (semanas)": p["prazo_semanas"],
                 }
                 for p in projetos
             ]),
             use_container_width=True, hide_index=True,
+            column_config={
+                "Nº máx. de analistas": st.column_config.NumberColumn(
+                    "Nº máx. de analistas", help="Njmax — quantidade máxima de analistas vinculados ao projeto.",
+                ),
+                "Nº mín. de analistas": st.column_config.NumberColumn(
+                    "Nº mín. de analistas", help="Njmin — quantidade mínima de analistas exigida para o projeto ser aceito.",
+                ),
+            },
         )
     else:
         st.info("Nenhum projeto cadastrado.")
@@ -242,11 +250,13 @@ def _form_projeto(p):
             step=10.0, key=f"pr_horas_{chave}",
         )
         max_analistas = c3.number_input(
-            "Njmax", min_value=1, value=1 if novo else int(p["max_analistas"]), step=1, key=f"pr_maxan_{chave}",
+            "Nº máximo de analistas", min_value=1, value=1 if novo else int(p["max_analistas"]), step=1,
+            key=f"pr_maxan_{chave}", help="Njmax — quantidade máxima de analistas que podem ser vinculados a este projeto.",
         )
         min_analistas = c4.number_input(
-            "Njmin", min_value=1, max_value=int(max_analistas),
-            value=1 if novo else min(int(p["min_analistas"]), int(max_analistas)), step=1, key=f"pr_minan_{chave}",
+            "Nº mínimo de analistas", min_value=1, max_value=int(max_analistas),
+            value=1 if novo else min(int(p["min_analistas"]), int(max_analistas)), step=1,
+            key=f"pr_minan_{chave}", help="Njmin — quantidade mínima de analistas exigida para o projeto ser aceito.",
         )
         prazo_semanas = c5.number_input(
             "Prazo (semanas)", min_value=1, value=4 if novo else int(p["prazo_semanas"]), step=1,
@@ -490,8 +500,8 @@ def _secao_geracao():
                 erros.append(f"Horas de '{p['nome'] or 'projeto sem nome'}' devem ser maiores que zero.")
             if not (1 <= p["min_analistas"] <= p["max_analistas"]):
                 erros.append(
-                    f"Njmin de '{p['nome'] or 'projeto sem nome'}' deve satisfazer "
-                    f"1 ≤ Njmin ({p['min_analistas']}) ≤ Njmax ({p['max_analistas']})."
+                    f"O número mínimo de analistas de '{p['nome'] or 'projeto sem nome'}' (Njmin) deve satisfazer "
+                    f"1 ≤ Njmin ({p['min_analistas']}) ≤ Njmax ({p['max_analistas']}, número máximo de analistas)."
                 )
         return erros
 
