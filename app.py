@@ -8,7 +8,6 @@
 import hashlib
 import json
 import os
-import sqlite3
 from dataclasses import asdict
 
 import pandas as pd
@@ -16,14 +15,15 @@ import streamlit as st
 
 # Streamlit ja expoe st.secrets como variavel de ambiente automaticamente na
 # maioria das versoes, mas isso e' feito aqui de forma explicita (antes do
-# "import db", que le TURSO_DATABASE_URL/TURSO_AUTH_TOKEN de os.environ na
-# hora de abrir cada conexao) pra nao depender desse comportamento implicito -
-# ver db.py::get_connection. Sem essas secrets configuradas, nada muda: db.py
-# cai de volta pro arquivo SQLite local, como sempre foi. st.secrets lanca
-# StreamlitSecretNotFoundError quando nao existe NENHUM secrets.toml (caso
-# comum em dev local) - por isso o try/except em vez de "if _chave in st.secrets".
+# "import db", que le SUPABASE_DB_URL/TURSO_DATABASE_URL/TURSO_AUTH_TOKEN de
+# os.environ na hora de abrir cada conexao) pra nao depender desse
+# comportamento implicito - ver db.py::get_connection. Sem essas secrets
+# configuradas, nada muda: db.py cai de volta pro arquivo SQLite local, como
+# sempre foi. st.secrets lanca StreamlitSecretNotFoundError quando nao existe
+# NENHUM secrets.toml (caso comum em dev local) - por isso o try/except em
+# vez de "if _chave in st.secrets".
 try:
-    for _chave in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):
+    for _chave in ("SUPABASE_DB_URL", "DATABASE_URL", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):
         if _chave in st.secrets and _chave not in os.environ:
             os.environ[_chave] = st.secrets[_chave]
 except Exception:
@@ -178,7 +178,7 @@ def _form_analista(a):
                             db.update_analista(conn, a["id"], dados)
                     st.success("Analista salvo.")
                     st.rerun()
-                except sqlite3.IntegrityError:
+                except db.IntegrityError:
                     st.error(f"CPF '{cpf}' já está cadastrado para outro analista.")
 
         if not novo and col_remover.button("Remover", key=f"an_remover_{chave}", use_container_width=True):

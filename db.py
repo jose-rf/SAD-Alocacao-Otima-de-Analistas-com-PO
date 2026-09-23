@@ -34,19 +34,37 @@ try:
 except ImportError:
     libsql_client = None
 
+try:
+    import psycopg2
+    import psycopg2.extras
+except ImportError:
+    psycopg2 = None
+
 from optimization import TRAITS, ResultadoOtimizacao
 
 DB_PATH = Path(__file__).parent / "alocacao.db"
 
-# Persistencia remota opcional (Turso/libSQL) - contorna a limitacao do
-# Streamlit Community Cloud de nao ter disco persistente (o container e'
-# recriado do zero a cada rebuild/reboot, apagando qualquer arquivo local
-# como o alocacao.db). Se TURSO_DATABASE_URL e TURSO_AUTH_TOKEN estiverem
-# definidos (via variavel de ambiente OU st.secrets, que o Streamlit expoe
-# como variavel de ambiente automaticamente), os dados passam a viver num
-# banco libSQL remoto e sobrevivem a qualquer rebuild. Sem essas variaveis,
-# comportamento 100% igual a antes (arquivo SQLite local) - nao quebra
-# nenhum uso local/de teste existente.
+# Persistencia remota opcional (Postgres/Supabase ou Turso/libSQL) - contorna
+# a limitacao do Streamlit Community Cloud de nao ter disco persistente (o
+# container e' recriado do zero a cada rebuild/reboot, apagando qualquer
+# arquivo local como o alocacao.db). Prioridade: SUPABASE_DB_URL/DATABASE_URL
+# (Postgres) > TURSO_DATABASE_URL+TURSO_AUTH_TOKEN (libSQL) > arquivo SQLite
+# local (comportamento de sempre, usado quando nada disso esta' configurado -
+# nao quebra nenhum uso local/de teste existente). Essas variaveis vem de
+# os.environ, que tanto env vars comuns quanto st.secrets do Streamlit
+# preenchem (ver bridge no topo do app.py).
+#
+# IntegrityError abaixo unifica a excecao de violacao de UNIQUE (ex.: CPF
+# duplicado) entre os tres backends, ja que sqlite3.IntegrityError,
+# psycopg2.IntegrityError e libsql_client.LibsqlError sao classes
+# completamente diferentes - o resto do codigo (app.py) captura
+# db.IntegrityError em vez de uma classe especifica de driver.
+_erros_integridade = [sqlite3.IntegrityError]
+if psycopg2 is not None:
+    _erros_integridade.append(psycopg2.IntegrityError)
+if libsql_client is not None:
+    _erros_integridade.append(libsql_client.LibsqlError)
+IntegrityError = tuple(_erros_integridade)
 
 SITUACAO_CANDIDATA = "candidata"
 SITUACAO_CONFIRMADA = "confirmada"
@@ -164,11 +182,192 @@ CREATE TABLE IF NOT EXISTS app_meta (
 );
 """
 
+# Mesmo schema, dialeto Postgres (Supabase): SERIAL no lugar de
+# INTEGER...AUTOINCREMENT, e' sem "COLLATE NOCASE" (Postgres nao tem - o
+# unico uso, o catalogo de habilidades, vira indice funcional sobre
+# LOWER(nome) em vez de UNIQUE inline). O resto (tipos REAL/TEXT/INTEGER,
+# REFERENCES...ON DELETE, indice parcial com WHERE, PRIMARY KEY composta)
+# e' identico nos dois bancos.
+_SCHEMA_PG = """
+CREATE TABLE IF NOT EXISTS analistas (
+    id_analista     SERIAL PRIMARY KEY,
+    nome            TEXT NOT NULL,
+    cpf             TEXT NOT NULL DEFAULT '',
+    senioridade     TEXT NOT NULL,
+    custo_hora      REAL NOT NULL,
+    disponibilidade REAL NOT NULL,
+    ausente         INTEGER NOT NULL DEFAULT 0,
+    com             REAL NOT NULL DEFAULT 50,
+    col             REAL NOT NULL DEFAULT 50,
+    org             REAL NOT NULL DEFAULT 50,
+    ada             REAL NOT NULL DEFAULT 50,
+    est             REAL NOT NULL DEFAULT 50
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_analistas_cpf ON analistas(cpf) WHERE cpf != '';
+
+CREATE TABLE IF NOT EXISTS projetos (
+    id_projeto      SERIAL PRIMARY KEY,
+    nome            TEXT NOT NULL,
+    receita         REAL NOT NULL,
+    horas           REAL NOT NULL,
+    nivel_min       TEXT NOT NULL,
+    max_analistas   INTEGER NOT NULL DEFAULT 1,
+    min_analistas   INTEGER NOT NULL DEFAULT 1,
+    prazo_semanas   INTEGER NOT NULL DEFAULT 4,
+    com_min         REAL NOT NULL DEFAULT 0,
+    col_min         REAL NOT NULL DEFAULT 0,
+    org_min         REAL NOT NULL DEFAULT 0,
+    ada_min         REAL NOT NULL DEFAULT 0,
+    est_min         REAL NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS habilidades (
+    id_habilidade   SERIAL PRIMARY KEY,
+    nome            TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_habilidades_nome_ci ON habilidades (LOWER(nome));
+
+CREATE TABLE IF NOT EXISTS analista_habilidade (
+    id_analista         INTEGER NOT NULL REFERENCES analistas(id_analista) ON DELETE CASCADE,
+    id_habilidade       INTEGER NOT NULL REFERENCES habilidades(id_habilidade) ON DELETE CASCADE,
+    nivel_proficiencia  REAL NOT NULL,
+    PRIMARY KEY (id_analista, id_habilidade)
+);
+
+CREATE TABLE IF NOT EXISTS projeto_habilidade_requerida (
+    id_projeto      INTEGER NOT NULL REFERENCES projetos(id_projeto) ON DELETE CASCADE,
+    id_habilidade   INTEGER NOT NULL REFERENCES habilidades(id_habilidade) ON DELETE CASCADE,
+    nivel_exigido   REAL NOT NULL,
+    PRIMARY KEY (id_projeto, id_habilidade)
+);
+
+CREATE TABLE IF NOT EXISTS execucoes (
+    id_execucao           SERIAL PRIMARY KEY,
+    executado_em          TEXT NOT NULL,
+    h_min                 REAL NOT NULL,
+    status                TEXT NOT NULL,
+    viavel                INTEGER NOT NULL,
+    lucro_liquido         REAL,
+    receita_total         REAL,
+    custo_total           REAL,
+    situacao              TEXT NOT NULL DEFAULT 'candidata',
+    periodo_referencia    TEXT,
+    input_hash            TEXT,
+    data_confirmacao      TEXT,
+    tempo_processamento_s REAL,
+    taxa_ocupacao_equipe  REAL
+);
+
+CREATE TABLE IF NOT EXISTS alocacoes (
+    id_alocacao     SERIAL PRIMARY KEY,
+    id_execucao     INTEGER NOT NULL REFERENCES execucoes(id_execucao) ON DELETE CASCADE,
+    id_analista     INTEGER REFERENCES analistas(id_analista) ON DELETE SET NULL,
+    id_projeto      INTEGER REFERENCES projetos(id_projeto) ON DELETE SET NULL,
+    analista_nome   TEXT NOT NULL,
+    projeto_nome    TEXT NOT NULL,
+    horas           REAL NOT NULL,
+    custo           REAL NOT NULL,
+    receita         REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS app_meta (
+    chave   TEXT PRIMARY KEY,
+    valor   TEXT NOT NULL
+);
+"""
+
+
+def _pg_config():
+    return os.environ.get("SUPABASE_DB_URL") or os.environ.get("DATABASE_URL")
+
 
 def _turso_config():
     url = os.environ.get("TURSO_DATABASE_URL")
     token = os.environ.get("TURSO_AUTH_TOKEN")
     return (url, token) if url and token else None
+
+
+_PG_PARAM_RE = re.compile(r"(?<!:):(\w+)")  # nao casa "::" (cast do Postgres, ex.: CAST evita mas ainda assim protegido)
+_PG_PK_POR_TABELA = {
+    "habilidades": "id_habilidade",
+    "analistas": "id_analista",
+    "projetos": "id_projeto",
+    "execucoes": "id_execucao",
+    "alocacoes": "id_alocacao",
+}
+_PG_INSERT_TABELA_RE = re.compile(r"(?is)^\s*INSERT\s+INTO\s+(\w+)")
+
+
+def _translate_sql_for_pg(sql: str) -> str:
+    # db.py escreve as queries em sintaxe SQLite (placeholder posicional '?'
+    # e nomeado ':nome'); psycopg2 usa '%s' e '%(nome)s'. So' texto, nao mexe
+    # nos valores dos parametros - passados separados em todo lugar.
+    sql = _PG_PARAM_RE.sub(r"%(\1)s", sql)
+    return sql.replace("?", "%s")
+
+
+class _PgCursor:
+    # Mesma ideia do _LibsqlCursor: imita fetchone/fetchall/iteracao/lastrowid
+    # o suficiente pro resto do db.py funcionar sem saber que esta' falando
+    # com Postgres. Postgres nao tem cursor.lastrowid (conceito proprio do
+    # SQLite) - _PgConnection.execute() detecta um INSERT INTO <tabela
+    # conhecida> sem RETURNING explicito e acrescenta "RETURNING <pk>"; o
+    # valor devolvido vira o lastrowid aqui.
+    def __init__(self, cur, is_lastrowid_insert=False):
+        if cur.description is not None:
+            self._rows = cur.fetchall()
+        else:
+            self._rows = []
+        self.lastrowid = (
+            list(self._rows[0].values())[0] if is_lastrowid_insert and self._rows else None
+        )
+        cur.close()
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    def fetchall(self):
+        return self._rows
+
+    def __iter__(self):
+        return iter(self._rows)
+
+
+class _PgConnection:
+    # Adaptador equivalente ao _LibsqlConnection, pra Postgres (psycopg2) via
+    # Supabase. Ao contrario do libsql_client, uma unica conexao psycopg2
+    # mantem uma transacao real ao longo de todo o bloco `with
+    # get_connection() as conn:` (varios cursor() na mesma connection
+    # compartilham a mesma transacao) - falha no meio desfaz tudo, igual
+    # sqlite3. commit()/close() sao passthrough direto pra connection real.
+    def __init__(self, pg_conn):
+        self._conn = pg_conn
+
+    def execute(self, sql, params=None):
+        translated = _translate_sql_for_pg(sql)
+        m = _PG_INSERT_TABELA_RE.match(sql)
+        is_lastrowid_insert = False
+        if m and "returning" not in translated.lower():
+            pk = _PG_PK_POR_TABELA.get(m.group(1).lower())
+            if pk:
+                translated = translated.rstrip().rstrip(";") + f" RETURNING {pk}"
+                is_lastrowid_insert = True
+        cur = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(translated, params if params is not None else ())
+        return _PgCursor(cur, is_lastrowid_insert=is_lastrowid_insert)
+
+    def executescript(self, script):
+        cur = self._conn.cursor()
+        cur.execute(script)
+        cur.close()
+
+    def commit(self):
+        self._conn.commit()
+
+    def close(self):
+        self._conn.close()
 
 
 class _LibsqlCursor:
@@ -222,8 +421,16 @@ class _LibsqlConnection:
 
 @contextmanager
 def get_connection() -> Iterator[sqlite3.Connection]:
+    pg_url = _pg_config()
     turso = _turso_config()
-    if turso:
+    if pg_url:
+        if psycopg2 is None:
+            raise RuntimeError(
+                "SUPABASE_DB_URL/DATABASE_URL configurado, mas o pacote psycopg2 "
+                "nao esta instalado (adicione 'psycopg2-binary' ao requirements.txt)."
+            )
+        conn = _PgConnection(psycopg2.connect(pg_url))
+    elif turso:
         if libsql_client is None:
             raise RuntimeError(
                 "TURSO_DATABASE_URL/TURSO_AUTH_TOKEN configurados, mas o pacote "
@@ -232,10 +439,11 @@ def get_connection() -> Iterator[sqlite3.Connection]:
             )
         url, token = turso
         conn = _LibsqlConnection(libsql_client.create_client_sync(url=url, auth_token=token))
+        conn.execute("PRAGMA foreign_keys = ON")
     else:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA foreign_keys = ON")
     try:
         yield conn
         conn.commit()
@@ -244,6 +452,11 @@ def get_connection() -> Iterator[sqlite3.Connection]:
 
 
 def _column_names(conn: sqlite3.Connection, table: str) -> set:
+    if isinstance(conn, _PgConnection):
+        rows = conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = ?", (table,)
+        )
+        return {r["column_name"] for r in rows}
     return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
 
 
@@ -306,7 +519,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 def init_db() -> None:
     with get_connection() as conn:
-        conn.executescript(_SCHEMA)
+        conn.executescript(_SCHEMA_PG if isinstance(conn, _PgConnection) else _SCHEMA)
         _migrate(conn)
 
 
@@ -325,7 +538,7 @@ def add_habilidade(conn: sqlite3.Connection, nome: str) -> int:
     if not nome:
         raise ValueError("Nome da habilidade nao pode ser vazio.")
     existente = conn.execute(
-        "SELECT id_habilidade FROM habilidades WHERE nome = ? COLLATE NOCASE", (nome,)
+        "SELECT id_habilidade FROM habilidades WHERE LOWER(nome) = LOWER(?)", (nome,)
     ).fetchone()
     if existente:
         raise ValueError(f"Ja existe uma habilidade chamada '{nome}' no catalogo.")
@@ -338,7 +551,7 @@ def rename_habilidade(conn: sqlite3.Connection, id_habilidade: int, novo_nome: s
     if not novo_nome:
         raise ValueError("Nome da habilidade nao pode ser vazio.")
     existente = conn.execute(
-        "SELECT id_habilidade FROM habilidades WHERE nome = ? COLLATE NOCASE AND id_habilidade != ?",
+        "SELECT id_habilidade FROM habilidades WHERE LOWER(nome) = LOWER(?) AND id_habilidade != ?",
         (novo_nome, id_habilidade),
     ).fetchone()
     if existente:
@@ -548,7 +761,7 @@ def set_situacao_execucao(conn: sqlite3.Connection, id_execucao: int, situacao: 
     if situacao == SITUACAO_CONFIRMADA:
         # data_confirmacao e' o marco a partir do qual o prazo (prazo_semanas)
         # de cada projeto da execucao passa a contar (ver
-        # _EXPIRACAO_SQL). So' e' gravado na transicao pra CONFIRMADA -
+        # _expiracao_sql()). So' e' gravado na transicao pra CONFIRMADA -
         # o botao que dispara essa transicao so aparece uma vez por
         # execucao, entao nunca e' sobrescrito.
         conn.execute(
@@ -567,10 +780,15 @@ def set_situacao_execucao(conn: sqlite3.Connection, id_execucao: int, situacao: 
 # Prazo automatico por data (registrado em 06/09/2026): projetos tem fim, e
 # uma vez o prazo estourado as horas do analista voltam a ficar livres sem
 # precisar de acao manual do gestor. Compara em UTC (data_confirmacao e'
-# gravada com datetime.utcnow()) pra' bater com datetime('now') do SQLite.
-# Se o projeto foi excluido do cadastro (p.id_projeto IS NULL), mantem
-# contando por seguranca (nao da pra saber o prazo original).
-_EXPIRACAO_SQL = """
+# gravada com datetime.utcnow()) pra' bater com "agora" do banco. Se o
+# projeto foi excluido do cadastro (p.id_projeto IS NULL), mantem contando
+# por seguranca (nao da pra saber o prazo original).
+#
+# datetime(x, '+N days')/datetime('now') e' sintaxe SQLite - Postgres nao
+# tem essas funcoes, entao a expressao e' montada por dialeto (mesma logica,
+# sintaxe diferente: cast pra timestamp + interval, comparado a NOW() AT
+# TIME ZONE 'UTC').
+_EXPIRACAO_SQL_SQLITE = """
     CASE
         WHEN e.situacao != 'confirmada' THEN 0
         WHEN e.data_confirmacao IS NULL THEN 1
@@ -579,11 +797,26 @@ _EXPIRACAO_SQL = """
         ELSE 0
     END
 """
+_EXPIRACAO_SQL_PG = """
+    CASE
+        WHEN e.situacao != 'confirmada' THEN 0
+        WHEN e.data_confirmacao IS NULL THEN 1
+        WHEN p.id_projeto IS NULL THEN 1
+        WHEN (CAST(e.data_confirmacao AS timestamp)
+              + CAST((p.prazo_semanas * 7 || ' days') AS interval))
+             > (NOW() AT TIME ZONE 'UTC') THEN 1
+        ELSE 0
+    END
+"""
+
+
+def _expiracao_sql(conn) -> str:
+    return _EXPIRACAO_SQL_PG if isinstance(conn, _PgConnection) else _EXPIRACAO_SQL_SQLITE
 
 
 def list_alocacoes_execucao(conn: sqlite3.Connection, id_execucao: int) -> List[sqlite3.Row]:
     return conn.execute(
-        f"""SELECT al.*, ({_EXPIRACAO_SQL}) AS ativa
+        f"""SELECT al.*, ({_expiracao_sql(conn)}) AS ativa
             FROM alocacoes al
             JOIN execucoes e ON al.id_execucao = e.id_execucao
             LEFT JOIN projetos p ON al.id_projeto = p.id_projeto
@@ -605,7 +838,7 @@ def get_horas_comprometidas(conn: sqlite3.Connection, id_analista: int) -> float
             FROM alocacoes al
             JOIN execucoes e ON al.id_execucao = e.id_execucao
             LEFT JOIN projetos p ON al.id_projeto = p.id_projeto
-            WHERE al.id_analista = ? AND ({_EXPIRACAO_SQL}) = 1""",
+            WHERE al.id_analista = ? AND ({_expiracao_sql(conn)}) = 1""",
         (id_analista,),
     ).fetchone()
     return row["total"] or 0.0
@@ -638,7 +871,7 @@ def _get_or_create_habilidade(conn: sqlite3.Connection, nome: str) -> int:
     # (ex.: gestor apaga todos os analistas mas mantem as habilidades).
     nome = normalizar_nome_habilidade(nome)
     existente = conn.execute(
-        "SELECT id_habilidade FROM habilidades WHERE nome = ? COLLATE NOCASE", (nome,)
+        "SELECT id_habilidade FROM habilidades WHERE LOWER(nome) = LOWER(?)", (nome,)
     ).fetchone()
     if existente:
         return existente["id_habilidade"]
