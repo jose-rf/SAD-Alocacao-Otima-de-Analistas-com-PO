@@ -1,5 +1,5 @@
 streamlit>=1.36
-pulp>=2.7
+pulp==3.3.2
 pandas>=2.0
 libsql-client>=0.3
 psycopg2-binary>=2.9
