@@ -805,6 +805,31 @@ def set_situacao_execucao(conn: sqlite3.Connection, id_execucao: int, situacao: 
         )
 
 
+def contar_execucoes_confirmadas(conn: sqlite3.Connection) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) AS n FROM execucoes WHERE situacao = ?", (SITUACAO_CONFIRMADA,)
+    ).fetchone()["n"]
+
+
+def limpar_todas_alocacoes_confirmadas(conn: sqlite3.Connection) -> int:
+    # Versao em lote do botao "Limpar alocacao escolhida": toda execucao
+    # CONFIRMADA volta a ser CANDIDATA (como se o clique em "Escolher esta
+    # alocacao" nunca tivesse acontecido), o que libera as horas do time de
+    # uma vez - so' execucoes confirmadas contam como hora comprometida - e
+    # faz os projetos deixarem de aparecer como "ja confirmados" na proxima
+    # rodada. Nao apaga nada do historico, nem toca nas ENCERRADAS (essas
+    # registram que o projeto de fato terminou/foi cancelado). Devolve quantas
+    # execucoes foram revertidas (contado antes porque o cursor dos adaptadores
+    # Postgres/libSQL nao expoe rowcount).
+    n = contar_execucoes_confirmadas(conn)
+    if n:
+        conn.execute(
+            "UPDATE execucoes SET situacao = ?, data_confirmacao = NULL WHERE situacao = ?",
+            (SITUACAO_CANDIDATA, SITUACAO_CONFIRMADA),
+        )
+    return n
+
+
 # Expressao SQL reutilizada: 1 se a alocacao ainda conta como hora
 # comprometida, 0 se ja' passou do prazo do projeto (prazo_semanas contado a
 # partir de execucoes.data_confirmacao) ou se a execucao nao esta' confirmada.

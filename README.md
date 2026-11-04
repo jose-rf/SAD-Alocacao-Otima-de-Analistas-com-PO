@@ -304,7 +304,14 @@ sem CSS solto no codigo):
    alocacao" (confirma), "Limpar alocacao escolhida" (desfaz a confirmacao,
    volta a candidata) ou "Encerrar alocacao" (marca como finalizada,
    libera as horas permanentemente) e exportacao do relatorio completo em
-   `.txt`.
+   `.txt`. Acima do historico, enquanto houver alguma alocacao confirmada,
+   aparece uma barra com o total de alocacoes escolhidas e de horas do time
+   ainda comprometidas, com o botao **"Limpar todas as alocacoes
+   escolhidas"** (com confirmacao em dois passos): reverte de uma vez todas
+   as execucoes confirmadas para candidata - libera as horas do time e
+   desmarca o "(ja confirmado)" dos projetos, para simular outros cenarios
+   sem clicar execucao por execucao. Preserva o historico e nao mexe nas
+   execucoes ja encerradas.
 
 Dados de exemplo (ficticios, ver secao 6.1.3 do pre-projeto) sao carregados
 automaticamente na primeira execucao, quando o banco ainda esta' vazio.

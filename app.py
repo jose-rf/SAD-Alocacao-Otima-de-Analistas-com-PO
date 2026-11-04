@@ -589,6 +589,41 @@ def pagina_dashboard():
 
     with db.get_connection() as conn:
         execucoes = db.list_execucoes(conn)
+        n_confirmadas = db.contar_execucoes_confirmadas(conn)
+        horas_comprometidas_total = (
+            sum(db.get_horas_comprometidas_todos_analistas(conn).values()) if n_confirmadas else 0.0
+        )
+
+    if n_confirmadas:
+        with st.container(border=True):
+            c_resumo, c_acao = st.columns([3, 1])
+            c_resumo.markdown(
+                f"**{n_confirmadas} alocação(ões) escolhida(s)** · "
+                f"{horas_comprometidas_total:,.0f} h do time ainda comprometidas"
+            )
+            if not st.session_state.get("confirmar_limpar_todas"):
+                if c_acao.button("Limpar todas as alocações escolhidas", key="btn_limpar_todas",
+                                 use_container_width=True):
+                    st.session_state.confirmar_limpar_todas = True
+                    st.rerun()
+            else:
+                st.warning(
+                    "Todas as alocações escolhidas voltarão a ser prévias e as horas do time serão "
+                    "liberadas. O histórico de execuções é mantido. Confirmar?"
+                )
+                c_sim, c_nao, _ = st.columns([1, 1, 2])
+                if c_sim.button("Sim, limpar todas", type="primary", key="btn_limpar_todas_sim",
+                                use_container_width=True):
+                    with db.get_connection() as conn:
+                        n_limpas = db.limpar_todas_alocacoes_confirmadas(conn)
+                    st.session_state.confirmar_limpar_todas = False
+                    st.toast(f"{n_limpas} alocação(ões) limpa(s). As horas do time foram liberadas.")
+                    st.rerun()
+                if c_nao.button("Cancelar", key="btn_limpar_todas_nao", use_container_width=True):
+                    st.session_state.confirmar_limpar_todas = False
+                    st.rerun()
+    else:
+        st.session_state.confirmar_limpar_todas = False
 
     if not execucoes:
         st.info("Nenhuma execução registrada ainda. Gere uma prévia acima.")
