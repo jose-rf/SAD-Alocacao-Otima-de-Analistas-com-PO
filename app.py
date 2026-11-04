@@ -608,16 +608,31 @@ def pagina_dashboard():
                     st.rerun()
             else:
                 st.warning(
-                    "Todas as alocações escolhidas voltarão a ser prévias e as horas do time serão "
-                    "liberadas. O histórico de execuções é mantido. Confirmar?"
+                    f"As {n_confirmadas} execução(ões) confirmada(s) serão APAGADAS do histórico, "
+                    "junto com as alocações detalhadas delas, e as horas do time serão liberadas. "
+                    "As prévias e as execuções encerradas são mantidas. "
+                    "Esta ação não pode ser desfeita. Confirmar?"
                 )
                 c_sim, c_nao, _ = st.columns([1, 1, 2])
-                if c_sim.button("Sim, limpar todas", type="primary", key="btn_limpar_todas_sim",
+                if c_sim.button("Sim, apagar as confirmadas", type="primary", key="btn_limpar_todas_sim",
                                 use_container_width=True):
                     with db.get_connection() as conn:
-                        n_limpas = db.limpar_todas_alocacoes_confirmadas(conn)
+                        ids_apagados = db.limpar_todas_alocacoes_confirmadas(conn)
+                        restantes = db.list_execucoes(conn, limit=1)
                     st.session_state.confirmar_limpar_todas = False
-                    st.toast(f"{n_limpas} alocação(ões) limpa(s). As horas do time foram liberadas.")
+                    # o seletor "Execucao" e o detalhe em memoria podem estar apontando pra
+                    # uma execucao que acabou de ser apagada. O seletor precisa receber um id
+                    # VALIDO (a execucao mais recente que sobrou) - so' remover a chave deixava
+                    # o rotulo antigo (ex.: "#3") na tela com o conteudo de outra execucao.
+                    if restantes:
+                        st.session_state["dashboard_execucao_sel"] = restantes[0]["id_execucao"]
+                    else:
+                        st.session_state.pop("dashboard_execucao_sel", None)
+                    if st.session_state.ultima_execucao_id in ids_apagados:
+                        st.session_state.ultima_execucao_id = None
+                        st.session_state.resultado = None
+                    st.toast(f"{len(ids_apagados)} execução(ões) confirmada(s) apagada(s). "
+                             "As horas do time foram liberadas.")
                     st.rerun()
                 if c_nao.button("Cancelar", key="btn_limpar_todas_nao", use_container_width=True):
                     st.session_state.confirmar_limpar_todas = False
@@ -643,6 +658,10 @@ def pagina_dashboard():
     st.subheader("Detalhe da execução")
     opcoes_ids = [e["id_execucao"] for e in execucoes]
     default_id = st.session_state.ultima_execucao_id if st.session_state.ultima_execucao_id in opcoes_ids else opcoes_ids[0]
+    # Selecao guardada que ja nao existe (execucao apagada, inclusive por outra aba/
+    # sessao): sem isso o selectbox ficava sem valor e o detalhe quebrava.
+    if "dashboard_execucao_sel" in st.session_state and st.session_state["dashboard_execucao_sel"] not in opcoes_ids:
+        st.session_state["dashboard_execucao_sel"] = default_id
     id_execucao_sel = st.selectbox(
         "Execução", options=opcoes_ids, index=opcoes_ids.index(default_id),
         format_func=lambda i: f"#{i}", key="dashboard_execucao_sel",

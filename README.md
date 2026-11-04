@@ -307,11 +307,13 @@ sem CSS solto no codigo):
    `.txt`. Acima do historico, enquanto houver alguma alocacao confirmada,
    aparece uma barra com o total de alocacoes escolhidas e de horas do time
    ainda comprometidas, com o botao **"Limpar todas as alocacoes
-   escolhidas"** (com confirmacao em dois passos): reverte de uma vez todas
-   as execucoes confirmadas para candidata - libera as horas do time e
-   desmarca o "(ja confirmado)" dos projetos, para simular outros cenarios
-   sem clicar execucao por execucao. Preserva o historico e nao mexe nas
-   execucoes ja encerradas.
+   escolhidas"** (com confirmacao em dois passos): **apaga** de uma vez todas
+   as execucoes confirmadas (e as alocacoes detalhadas delas) do historico -
+   libera as horas do time e desmarca o "(ja confirmado)" dos projetos, para
+   simular outros cenarios sem clicar execucao por execucao. A acao nao pode
+   ser desfeita; as previas (candidatas) e as execucoes ja encerradas sao
+   mantidas. Diferente do "Limpar alocacao escolhida" individual, que apenas
+   devolve uma execucao a condicao de candidata, sem remove-la.
 
 Dados de exemplo (ficticios, ver secao 6.1.3 do pre-projeto) sao carregados
 automaticamente na primeira execucao, quando o banco ainda esta' vazio.

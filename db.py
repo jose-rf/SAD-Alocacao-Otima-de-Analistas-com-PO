@@ -811,23 +811,33 @@ def contar_execucoes_confirmadas(conn: sqlite3.Connection) -> int:
     ).fetchone()["n"]
 
 
-def limpar_todas_alocacoes_confirmadas(conn: sqlite3.Connection) -> int:
-    # Versao em lote do botao "Limpar alocacao escolhida": toda execucao
-    # CONFIRMADA volta a ser CANDIDATA (como se o clique em "Escolher esta
-    # alocacao" nunca tivesse acontecido), o que libera as horas do time de
-    # uma vez - so' execucoes confirmadas contam como hora comprometida - e
-    # faz os projetos deixarem de aparecer como "ja confirmados" na proxima
-    # rodada. Nao apaga nada do historico, nem toca nas ENCERRADAS (essas
-    # registram que o projeto de fato terminou/foi cancelado). Devolve quantas
-    # execucoes foram revertidas (contado antes porque o cursor dos adaptadores
-    # Postgres/libSQL nao expoe rowcount).
-    n = contar_execucoes_confirmadas(conn)
-    if n:
+def limpar_todas_alocacoes_confirmadas(conn: sqlite3.Connection) -> List[int]:
+    # Botao "Limpar todas as alocacoes escolhidas": APAGA todas as execucoes
+    # CONFIRMADAS (e as alocacoes detalhadas delas), o que libera de uma vez
+    # as horas do time - so' execucoes confirmadas contam como hora
+    # comprometida - e faz os projetos deixarem de aparecer como "ja
+    # confirmados" na proxima rodada. Previas (candidatas) e execucoes
+    # ENCERRADAS (que registram que o projeto de fato terminou/foi cancelado)
+    # nao sao tocadas. Diferente do botao individual "Limpar alocacao
+    # escolhida" (que so' volta a execucao pra candidata), aqui a execucao
+    # some do historico - a pedido do usuario. A limpeza das alocacoes e'
+    # explicita (nao depende do ON DELETE CASCADE do banco, ver comentario em
+    # delete_habilidade). Devolve os ids apagados pra' a UI invalidar o que
+    # estiver apontando pra eles.
+    ids = [
+        r["id_execucao"] for r in conn.execute(
+            "SELECT id_execucao FROM execucoes WHERE situacao = ? ORDER BY id_execucao",
+            (SITUACAO_CONFIRMADA,),
+        ).fetchall()
+    ]
+    if ids:
         conn.execute(
-            "UPDATE execucoes SET situacao = ?, data_confirmacao = NULL WHERE situacao = ?",
-            (SITUACAO_CANDIDATA, SITUACAO_CONFIRMADA),
+            "DELETE FROM alocacoes WHERE id_execucao IN "
+            "(SELECT id_execucao FROM execucoes WHERE situacao = ?)",
+            (SITUACAO_CONFIRMADA,),
         )
-    return n
+        conn.execute("DELETE FROM execucoes WHERE situacao = ?", (SITUACAO_CONFIRMADA,))
+    return ids
 
 
 # Expressao SQL reutilizada: 1 se a alocacao ainda conta como hora
