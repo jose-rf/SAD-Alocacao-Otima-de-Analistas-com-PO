@@ -42,7 +42,7 @@ pre-projeto de TCC, resolvido com o solver **CBC** via biblioteca **PuLP**.
 **Funcao objetivo (Equacao 1)** — maximizar o lucro liquido:
 
 ```
-Maximizar Z = Σ_j Rj·y[j]  −  Σ_i Σ_j Ci·x[i,j]
+Maximizar L = Σ_j Rj·y[j]  −  Σ_i Σ_j Ci·x[i,j]
 ```
 
 **Restricoes (Equacoes 2 a 11)**

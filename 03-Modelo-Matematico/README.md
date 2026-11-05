@@ -29,7 +29,7 @@ R_j (receita), H_j (horas contratadas), S_j^min, COM_j^min, COL_j^min, ORG_j^min
 - h_min — horas mínimas por alocação (evita fragmentação)
 
 ## Função objetivo (Equação 1)
-Maximizar Z = Σ(j∈J) R_j·y_j − Σ(i∈I) Σ(j∈J) C_i·x_ij
+Maximizar L = Σ(j∈J) R_j·y_j − Σ(i∈I) Σ(j∈J) C_i·x_ij
 
 ## Restrições
 1. **Disponibilidade:** Σ(j) x_ij ≤ D_i, ∀i
