@@ -1,7 +1,15 @@
+# Sem "base" global: o Streamlit segue o tema do sistema/navegador e o usuario
+# pode alternar Claro/Escuro em Settings (menu ⋮). Requer streamlit >= 1.46.
 [theme]
-base = "dark"
 primaryColor = "#F97316"
+font = "sans serif"
+
+[theme.light]
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F3F4F6"
+textColor = "#1F2937"
+
+[theme.dark]
 backgroundColor = "#0E1117"
 secondaryBackgroundColor = "#181C23"
 textColor = "#E7E9EA"
-font = "sans serif"
