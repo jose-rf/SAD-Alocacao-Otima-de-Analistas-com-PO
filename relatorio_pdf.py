@@ -203,7 +203,11 @@ class _Cartoes(Flowable):
 
 
 class _CartaoProjeto(Flowable):
-    """Cartao arredondado com selo (Aceito/Recusado), nome do projeto e motivo opcional."""
+    """Cartao arredondado com selo (Aceito/Recusado) e nome do projeto.
+
+    Recusado: ocupa a linha inteira; selo + nome em cima e o motivo logo abaixo,
+    usando toda a largura do cartao (motivos sao longos).
+    """
     FONT, TAM = "Helvetica", 9.3
 
     def __init__(self, nome, aceito=True, motivo=""):
@@ -214,8 +218,10 @@ class _CartaoProjeto(Flowable):
         self.width = aw
         self.sw = 17 * mm if self.aceito else 20 * mm
         self.l_nome = simpleSplit(self.nome, self.FONT, self.TAM, aw - self.sw - 12 * mm)
-        self.l_mot = simpleSplit(self.motivo, self.FONT, 8, aw - self.sw - 12 * mm) if self.motivo else []
-        self.height = max(11 * mm, (len(self.l_nome) * 4.2 + len(self.l_mot) * 3.6) * mm + 6 * mm)
+        self.l_mot = simpleSplit(self.motivo, self.FONT, 8.3, aw - 10 * mm) if self.motivo else []
+        corpo_nome = max(len(self.l_nome) * 4.4 * mm, 5.4 * mm)
+        corpo_mot = (len(self.l_mot) * 3.9 * mm + 2.5 * mm) if self.l_mot else 0
+        self.height = corpo_nome + corpo_mot + 6.5 * mm
         return aw, self.height
 
     def draw(self):
@@ -225,26 +231,27 @@ class _CartaoProjeto(Flowable):
         c.setFillColor(colors.white)
         c.roundRect(0, 0, self.width, h, 3 * mm, stroke=1, fill=1)
         bg, tx = (VERDE_BG, VERDE_TX) if self.aceito else (VERM_BG, VERM_TX)
-        cy = h / 2
+        corpo_nome = max(len(self.l_nome) * 4.4 * mm, 5.4 * mm)
+        cy = h - 3.25 * mm - corpo_nome / 2          # centro vertical da linha do nome
         c.setFillColor(bg)
         c.roundRect(4 * mm, cy - 2.7 * mm, self.sw, 5.4 * mm, 2.7 * mm, stroke=0, fill=1)
         c.setFillColor(tx)
         c.setFont("Helvetica-Bold", 8)
         c.drawCentredString(4 * mm + self.sw / 2, cy - 1 * mm, "Aceito" if self.aceito else "Recusado")
         x = 4 * mm + self.sw + 4 * mm
-        n_l, n_m = len(self.l_nome), len(self.l_mot)
-        topo = cy + ((n_l * 4.2 + n_m * 3.6) / 2) * mm
-        y = topo - 3.3 * mm
+        y = h - 3.25 * mm - 3.3 * mm - (corpo_nome - len(self.l_nome) * 4.4 * mm) / 2
         c.setFillColor(GRAFITE)
         c.setFont(self.FONT, self.TAM)
         for ln in self.l_nome:
             c.drawString(x, y, ln)
-            y -= 4.2 * mm
-        c.setFillColor(CINZA)
-        c.setFont(self.FONT, 8)
-        for ln in self.l_mot:
-            c.drawString(x, y + 0.4 * mm, ln)
-            y -= 3.6 * mm
+            y -= 4.4 * mm
+        if self.l_mot:
+            y = h - 3.25 * mm - corpo_nome - 3.2 * mm
+            c.setFillColor(CINZA)
+            c.setFont(self.FONT, 8.3)
+            for ln in self.l_mot:
+                c.drawString(5 * mm, y, ln)
+                y -= 3.9 * mm
 
 
 class _NotaMetodologica(Flowable):
@@ -381,18 +388,20 @@ def gerar_pdf(execucao, alocacoes: Iterable[dict], aceitos=None, recusados=None,
             h.append(Paragraph("Nenhuma alocação realizada.", CORPO))
 
         h += [Spacer(1, 6 * mm)]
-        cartoes = []
         if aceitos is not None:
-            cartoes += [_CartaoProjeto(n, True) for n in aceitos]
-            cartoes += [_CartaoProjeto(n, False, m) for n, m in (recusados or [])]
+            c_ace = [_CartaoProjeto(n, True) for n in aceitos]
+            c_rec = [_CartaoProjeto(n, False, m) for n, m in (recusados or [])]
         else:
-            cartoes += [_CartaoProjeto(n, True) for n in sorted({a["projeto_nome"] for a in alocacoes})]
+            c_ace = [_CartaoProjeto(n, True) for n in sorted({a["projeto_nome"] for a in alocacoes})]
+            c_rec = []
         bloco = [_Secao(3, "Projetos aceitos e recusados"), Spacer(1, 1 * mm)]
-        if cartoes:
-            bloco.append(_grade_projetos(cartoes))
+        if c_ace:
+            bloco.append(_grade_projetos(c_ace))
+        for cr in c_rec:  # recusados: um por linha, largura total
+            bloco += [cr, Spacer(1, 3 * mm)]
         if aceitos is None:
             bloco.append(Paragraph(
-                f"Os {len(cartoes)} projetos considerados nesta execução foram aceitos. Os motivos de recusa não "
+                f"Os {len(c_ace)} projetos considerados nesta execução foram aceitos. Os motivos de recusa não "
                 "estão disponíveis porque só ficam registrados na sessão em que a execução foi gerada.", NOTA))
         h += [KeepTogether(bloco[:3])] + bloco[3:]
 
