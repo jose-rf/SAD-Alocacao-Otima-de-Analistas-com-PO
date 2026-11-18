@@ -121,7 +121,15 @@ class _CaixaMeta(Flowable):
         for (rot, val), frac in zip(self.itens, larguras):
             c.setFont("Helvetica", 8.5)
             c.setFillColor(CINZA)
-            c.drawString(x, h - 7.5 * mm, rot)
+            if "_" in rot:  # notacao com subscrito: "Parâmetro h_min" -> h com "min" abaixo
+                base, sub = rot.split("_", 1)
+                c.drawString(x, h - 7.5 * mm, base)
+                bx = x + c.stringWidth(base, "Helvetica", 8.5)
+                c.setFont("Helvetica", 6)
+                c.drawString(bx, h - 8.9 * mm, sub)
+                c.setFont("Helvetica", 8.5)
+            else:
+                c.drawString(x, h - 7.5 * mm, rot)
             c.setFont("Helvetica-Bold", 10.5)
             c.setFillColor(GRAFITE)
             c.drawString(x, h - 13.5 * mm, val)

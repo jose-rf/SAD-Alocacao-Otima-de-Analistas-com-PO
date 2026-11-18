@@ -213,10 +213,10 @@ def pagina_projetos():
             use_container_width=True, hide_index=True,
             column_config={
                 "Nº máx. de analistas": st.column_config.NumberColumn(
-                    "Nº máx. de analistas", help="Njmax — quantidade máxima de analistas vinculados ao projeto.",
+                    "Nº máx. de analistas", help="$N_j^{max}$ — quantidade máxima de analistas vinculados ao projeto.",
                 ),
                 "Nº mín. de analistas": st.column_config.NumberColumn(
-                    "Nº mín. de analistas", help="Njmin — quantidade mínima de analistas exigida para o projeto ser aceito.",
+                    "Nº mín. de analistas", help="$N_j^{min}$ — quantidade mínima de analistas exigida para o projeto ser aceito.",
                 ),
             },
         )
@@ -252,12 +252,12 @@ def _form_projeto(p):
         )
         max_analistas = c3.number_input(
             "Nº máximo de analistas", min_value=1, value=1 if novo else int(p["max_analistas"]), step=1,
-            key=f"pr_maxan_{chave}", help="Njmax — quantidade máxima de analistas que podem ser vinculados a este projeto.",
+            key=f"pr_maxan_{chave}", help="$N_j^{max}$ — quantidade máxima de analistas que podem ser vinculados a este projeto.",
         )
         min_analistas = c4.number_input(
             "Nº mínimo de analistas", min_value=1, max_value=int(max_analistas),
             value=1 if novo else min(int(p["min_analistas"]), int(max_analistas)), step=1,
-            key=f"pr_minan_{chave}", help="Njmin — quantidade mínima de analistas exigida para o projeto ser aceito.",
+            key=f"pr_minan_{chave}", help="$N_j^{min}$ — quantidade mínima de analistas exigida para o projeto ser aceito.",
         )
         prazo_semanas = c5.number_input(
             "Prazo (semanas)", min_value=1, value=4 if novo else int(p["prazo_semanas"]), step=1,
@@ -438,7 +438,7 @@ def _secao_geracao():
 
     with st.container(border=True):
         st.session_state.h_min = st.number_input(
-            "Horas mínimas por alocação (h_min)", min_value=0, value=int(st.session_state.h_min), step=5,
+            "Horas mínimas por alocação ($h_{min}$)", min_value=0, value=int(st.session_state.h_min), step=5,
         )
 
         st.caption(
