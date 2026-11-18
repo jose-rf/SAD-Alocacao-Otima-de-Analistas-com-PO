@@ -193,6 +193,7 @@ existir uma validacao de faixa de `Di` que não existia de fato no codigo):
 
 ```
 optimization.py         # modelo MILP (Equacoes 1-11) — dataclasses Analista/Projeto,
+relatorio_pdf.py         # relatorio da execucao em PDF (reportlab)
                         # construcao e resolucao via PuLP/CBC, diagnostico de recusa
 db.py                   # persistencia SQLite (schema, CRUD, seed de dados de exemplo)
 app.py                  # interface Streamlit (paginas, navegacao, formularios)
@@ -304,7 +305,7 @@ sem CSS solto no codigo):
    alocacao" (confirma), "Limpar alocacao escolhida" (desfaz a confirmacao,
    volta a candidata) ou "Encerrar alocacao" (marca como finalizada,
    libera as horas permanentemente) e exportacao do relatorio completo em
-   `.txt`. Acima do historico, enquanto houver alguma alocacao confirmada,
+   PDF estilizado (`relatorio_pdf.py`). Acima do historico, enquanto houver alguma alocacao confirmada,
    aparece uma barra com o total de alocacoes escolhidas e de horas do time
    ainda comprometidas, com o botao **"Limpar todas as alocacoes
    escolhidas"** (com confirmacao em dois passos): **apaga** de uma vez todas

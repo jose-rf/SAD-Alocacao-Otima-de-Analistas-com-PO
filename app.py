@@ -773,63 +773,6 @@ def pagina_dashboard():
 
     st.subheader("Exportação do relatório")
 
-    def _montar_relatorio_txt() -> str:
-        tempo_cbc = execucao["tempo_processamento_s"]
-        tempo_cbc_fmt = f"{tempo_cbc:.3f}s" if tempo_cbc is not None else "—"
-        linhas = [
-            "RELATÓRIO DE ALOCAÇÃO ÓTIMA DE ANALISTAS",
-            "Sistema de Apoio à Decisão - Programação Linear Inteira Mista (PuLP/CBC)",
-            "=" * 60,
-            f"Execução #{execucao['id_execucao']} - {execucao['executado_em']}",
-            f"Situação: {execucao['situacao']}",
-            f"Parâmetro h_min: {execucao['h_min']}h",
-            f"Tempo de processamento CBC: {tempo_cbc_fmt}",
-            "",
-            "1. RESULTADO GERAL", "-" * 60,
-        ]
-        if not execucao["viavel"]:
-            linhas.append(f"Modelo inviável (status: {execucao['status']}).")
-        else:
-            taxa_ocupacao = execucao["taxa_ocupacao_equipe"]
-            taxa_ocupacao_fmt = f"{taxa_ocupacao:.1f}%" if taxa_ocupacao is not None else "—"
-            linhas += [
-                f"Lucro líquido total: R$ {execucao['lucro_liquido']:,.2f}",
-                f"Receita total: R$ {execucao['receita_total']:,.2f}",
-                f"Custo total alocado: R$ {execucao['custo_total']:,.2f}",
-                f"Taxa de ocupação da equipe: {taxa_ocupacao_fmt}",
-                "", "2. ALOCAÇÃO DETALHADA", "-" * 60,
-            ]
-            if alocacoes_db:
-                for a in alocacoes_db:
-                    linhas.append(
-                        f"- {a['analista_nome']} -> {a['projeto_nome']}: {a['horas']:.1f}h, "
-                        f"custo R$ {a['custo']:,.2f}, receita gerada R$ {a['receita']:,.2f}"
-                    )
-            else:
-                linhas.append("(nenhuma alocação realizada)")
-            linhas += ["", "3. PROJETOS ACEITOS E RECUSADOS", "-" * 60]
-            if tem_detalhe_sessao:
-                for nome in resultado_sessao.aceitos:
-                    linhas.append(f"- Aceito — {nome}")
-                for nome, motivo in resultado_sessao.recusados:
-                    linhas.append(f"- Recusado — {nome}: {motivo}")
-            else:
-                for nome in sorted({a["projeto_nome"] for a in alocacoes_db}):
-                    linhas.append(f"- Aceito — {nome}")
-                linhas.append(
-                    "(motivos de recusa não disponíveis: só ficam registrados na "
-                    "sessão em que a execução foi gerada)"
-                )
-        linhas += [
-            "", "4. NOTA METODOLÓGICA", "-" * 60,
-            "Resultado obtido pela resolução exata do modelo de Programação Linear "
-            "Inteira Mista via solver CBC (branch-and-cut), através da biblioteca PuLP. "
-            "Disponibilidade de cada analista desconta horas já comprometidas em "
-            "execuções confirmadas (soma cumulativa, liberada só ao encerrar uma execução).",
-        ]
-        return "\n".join(linhas)
-
-    col_pdf, col_txt = st.columns(2)
     try:
         pdf_bytes = relatorio_pdf.gerar_pdf(
             execucao, alocacoes_db,
@@ -837,16 +780,12 @@ def pagina_dashboard():
             recusados=resultado_sessao.recusados if tem_detalhe_sessao else None,
             resumo_analistas=resultado_sessao.resumo_analistas if tem_detalhe_sessao else None,
         )
-        col_pdf.download_button(
-            "Baixar relatório (PDF)", data=pdf_bytes, type="primary", use_container_width=True,
+        st.download_button(
+            "Baixar relatório (PDF)", data=pdf_bytes, type="primary",
             file_name=f"relatorio-execucao-{execucao['id_execucao']}.pdf", mime="application/pdf",
         )
     except Exception as exc:  # o PDF nunca deve derrubar o dashboard
-        col_pdf.error(f"Não foi possível gerar o PDF: {exc}")
-    col_txt.download_button(
-        "Baixar relatório (.txt)", data=_montar_relatorio_txt(), use_container_width=True,
-        file_name=f"relatorio-execucao-{execucao['id_execucao']}.txt", mime="text/plain",
-    )
+        st.error(f"Não foi possível gerar o PDF: {exc}")
 
 
 # =====================================================================
