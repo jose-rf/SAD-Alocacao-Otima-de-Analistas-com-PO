@@ -30,6 +30,7 @@ except Exception:
     pass
 
 import db
+import relatorio_pdf
 from optimization import (
     NIVEIS,
     NIVEIS_LABEL,
@@ -828,8 +829,22 @@ def pagina_dashboard():
         ]
         return "\n".join(linhas)
 
-    st.download_button(
-        "Baixar relatório (.txt)", data=_montar_relatorio_txt(),
+    col_pdf, col_txt = st.columns(2)
+    try:
+        pdf_bytes = relatorio_pdf.gerar_pdf(
+            execucao, alocacoes_db,
+            aceitos=resultado_sessao.aceitos if tem_detalhe_sessao else None,
+            recusados=resultado_sessao.recusados if tem_detalhe_sessao else None,
+            resumo_analistas=resultado_sessao.resumo_analistas if tem_detalhe_sessao else None,
+        )
+        col_pdf.download_button(
+            "Baixar relatório (PDF)", data=pdf_bytes, type="primary", use_container_width=True,
+            file_name=f"relatorio-execucao-{execucao['id_execucao']}.pdf", mime="application/pdf",
+        )
+    except Exception as exc:  # o PDF nunca deve derrubar o dashboard
+        col_pdf.error(f"Não foi possível gerar o PDF: {exc}")
+    col_txt.download_button(
+        "Baixar relatório (.txt)", data=_montar_relatorio_txt(), use_container_width=True,
         file_name=f"relatorio-execucao-{execucao['id_execucao']}.txt", mime="text/plain",
     )
 
