@@ -193,8 +193,8 @@ existir uma validacao de faixa de `Di` que não existia de fato no codigo):
 
 ```
 optimization.py         # modelo MILP (Equacoes 1-11) — dataclasses Analista/Projeto,
-relatorio_pdf.py         # relatorio da execucao em PDF (reportlab)
                         # construcao e resolucao via PuLP/CBC, diagnostico de recusa
+relatorio_pdf.py         # relatorio da execucao em PDF (reportlab)
 db.py                   # persistencia SQLite (schema, CRUD, seed de dados de exemplo)
 app.py                  # interface Streamlit (paginas, navegacao, formularios)
 .streamlit/config.toml  # tema (cor de destaque unica, modo escuro)
